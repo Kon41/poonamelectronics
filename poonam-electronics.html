@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Poonam Electronics — Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#FAF6EE;
+    --paper-line:#E3D8C2;
+    --margin-red:#C0524A;
+    --ink:#241C14;
+    --ink-soft:#6B5E4D;
+    --copper:#B5651D;
+    --copper-deep:#8F4E14;
+    --charcoal:#241D17;
+    --green:#3F7B5C;
+    --red:#B5453B;
+    --card:#FFFDF8;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:'Inter',sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .mono{font-family:'JetBrains Mono',monospace;}
+  .display{font-family:'Space Grotesk',sans-serif;}
+
+  /* ledger paper texture for main */
+  #app{
+    min-height:100vh;
+    background-image:
+      repeating-linear-gradient(to bottom, transparent 0, transparent 38px, var(--paper-line) 38px, var(--paper-line) 39px);
+    background-position: 0 96px;
+  }
+  header{
+    background:var(--charcoal);
+    color:#F5EEE0;
+    padding:14px 18px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    position:sticky;
+    top:0;
+    z-index:30;
+    border-bottom:3px solid var(--copper);
+  }
+  .brand{display:flex;align-items:center;gap:10px;}
+  .brand-mark{
+    width:34px;height:34px;border-radius:6px;
+    background:linear-gradient(135deg,var(--copper),var(--copper-deep));
+    display:flex;align-items:center;justify-content:center;
+    flex-shrink:0;
+  }
+  .brand-mark svg{width:20px;height:20px;}
+  .brand h1{font-size:16px;margin:0;font-weight:700;letter-spacing:0.2px;}
+  .brand .sub{font-size:11px;color:#C9BBA0;margin-top:1px;}
+  .role-chip{
+    font-size:11px;padding:4px 9px;border-radius:20px;
+    font-weight:600;letter-spacing:0.3px;text-transform:uppercase;
+  }
+  .role-chip.admin{background:#3A2A14;color:var(--copper);border:1px solid var(--copper);}
+  .role-chip.staff{background:#1F2A24;color:#7FBE9E;border:1px solid #3F7B5C;}
+  .hbtn{
+    background:transparent;border:1px solid #4A4030;color:#EAE1CC;
+    padding:6px 12px;border-radius:7px;font-size:12px;cursor:pointer;font-weight:600;
+  }
+  .hbtn:hover{background:#3A2F20;}
+
+  .sync-row{
+    display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-soft);
+  }
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 2s infinite;}
+  @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.35;}}
+
+  nav{
+    display:flex;gap:6px;padding:14px 18px 0;max-width:980px;margin:0 auto;
+  }
+  .tab{
+    font-family:'Space Grotesk',sans-serif;
+    font-weight:600;font-size:13px;padding:9px 16px;border-radius:8px 8px 0 0;
+    border:1px solid transparent;cursor:pointer;background:transparent;color:var(--ink-soft);
+  }
+  .tab.active{
+    background:var(--card);border:1px solid var(--paper-line);border-bottom-color:var(--card);
+    color:var(--ink);
+  }
+  main{max-width:980px;margin:0 auto;padding:0 18px 60px;}
+  .panel{
+    background:var(--card);
+    border:1px solid var(--paper-line);
+    border-radius:0 10px 10px 10px;
+    padding:20px;
+    margin-top:0;
+    box-shadow:0 1px 0 rgba(0,0,0,0.02);
+    position:relative;
+  }
+  .panel::before{
+    content:'';
+    position:absolute;left:48px;top:0;bottom:0;width:1px;background:var(--margin-red);opacity:0.35;
+    display:none;
+  }
+  .panel.ledger-style::before{display:block;}
+
+  .section-head{
+    display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;
+    margin-bottom:16px;
+  }
+  .section-head h2{font-size:18px;margin:0;font-family:'Space Grotesk',sans-serif;}
+  .section-head p{font-size:12.5px;color:var(--ink-soft);margin:3px 0 0;}
+
+  .btn{
+    font-family:'Inter',sans-serif;font-weight:600;font-size:13px;
+    padding:9px 15px;border-radius:8px;border:none;cursor:pointer;
+    display:inline-flex;align-items:center;gap:6px;
+  }
+  .btn-copper{background:var(--copper);color:#fff;}
+  .btn-copper:hover{background:var(--copper-deep);}
+  .btn-ghost{background:transparent;border:1px solid var(--paper-line);color:var(--ink);}
+  .btn-ghost:hover{background:#F2ECDC;}
+  .btn-danger{background:transparent;color:var(--red);border:1px solid #E3C8C5;}
+  .btn-danger:hover{background:#FBEFEE;}
+  .btn-sm{padding:5px 10px;font-size:12px;border-radius:6px;}
+  .btn:disabled{opacity:0.45;cursor:not-allowed;}
+
+  /* Rate cards = price tags */
+  .rate-grid{
+    display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px;
+  }
+  .rate-card{
+    border:1px solid var(--paper-line);
+    border-radius:10px;
+    padding:14px 14px 12px;
+    background:linear-gradient(180deg,#fff,#FFFCF6);
+    position:relative;
+    overflow:hidden;
+  }
+  .rate-card::after{
+    content:'';position:absolute;top:10px;right:10px;width:8px;height:8px;border-radius:50%;
+    background:var(--paper);border:1px solid var(--paper-line);
+  }
+  .rate-name{font-weight:600;font-size:14px;line-height:1.25;padding-right:16px;}
+  .rate-unit{font-size:11px;color:var(--ink-soft);margin-top:1px;}
+  .rate-price{
+    font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;color:var(--copper-deep);
+    margin-top:10px;
+  }
+  .rate-updated{font-size:10.5px;color:var(--ink-soft);margin-top:2px;}
+  .rate-actions{display:flex;gap:6px;margin-top:10px;}
+  .empty{
+    padding:40px 10px;text-align:center;color:var(--ink-soft);font-size:13px;
+  }
+
+  table{width:100%;border-collapse:collapse;font-size:13px;}
+  thead th{
+    text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:0.4px;
+    color:var(--ink-soft);border-bottom:2px solid var(--paper-line);padding:8px 8px;font-weight:600;
+  }
+  tbody td{padding:9px 8px;border-bottom:1px solid var(--paper-line);vertical-align:top;}
+  tbody tr:hover{background:#F8F3E6;}
+  .tag{
+    font-size:10.5px;padding:2px 8px;border-radius:20px;font-weight:600;text-transform:uppercase;letter-spacing:0.3px;
+  }
+  .tag.sale{background:#E7F2EC;color:var(--green);}
+  .tag.purchase{background:#FBF0E2;color:var(--copper-deep);}
+  .tag.expense{background:#FBEAE8;color:var(--red);}
+  .amt{font-family:'JetBrains Mono',monospace;font-weight:600;}
+  .amt.neg{color:var(--red);}
+  .amt.pos{color:var(--green);}
+
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;align-items:center;}
+  select, input[type=text], input[type=number], input[type=date]{
+    font-family:'Inter',sans-serif;font-size:13px;padding:8px 10px;border:1px solid var(--paper-line);
+    border-radius:7px;background:#fff;color:var(--ink);
+  }
+  input:focus, select:focus{outline:2px solid var(--copper);outline-offset:1px;}
+
+  .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:18px;}
+  .stat{
+    border:1px solid var(--paper-line);border-radius:10px;padding:14px;background:#fff;
+  }
+  .stat .label{font-size:11px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.3px;font-weight:600;}
+  .stat .value{font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;margin-top:6px;}
+  .stat.sale .value{color:var(--green);}
+  .stat.purchase .value{color:var(--copper-deep);}
+  .stat.expense .value{color:var(--red);}
+
+  /* Modal */
+  .overlay{
+    position:fixed;inset:0;background:rgba(36,28,20,0.55);display:flex;align-items:center;justify-content:center;
+    padding:16px;z-index:100;
+  }
+  .modal{
+    background:var(--card);border-radius:12px;padding:22px;width:100%;max-width:380px;
+    border:1px solid var(--paper-line);
+  }
+  .modal h3{margin:0 0 4px;font-family:'Space Grotesk',sans-serif;font-size:17px;}
+  .modal .desc{font-size:12.5px;color:var(--ink-soft);margin:0 0 16px;}
+  .field{margin-bottom:12px;}
+  .field label{display:block;font-size:12px;font-weight:600;margin-bottom:5px;color:var(--ink-soft);}
+  .field input, .field select{width:100%;}
+  .modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:18px;}
+  .err{color:var(--red);font-size:12px;margin-top:8px;min-height:14px;}
+
+  .login-tabs{display:flex;gap:6px;margin-bottom:18px;background:#F2ECDC;border-radius:9px;padding:4px;}
+  .login-tabs button{
+    flex:1;border:none;background:transparent;padding:8px;border-radius:6px;font-weight:600;font-size:13px;
+    cursor:pointer;color:var(--ink-soft);
+  }
+  .login-tabs button.active{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(0,0,0,0.08);}
+
+  .center-screen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .login-card{
+    width:100%;max-width:380px;background:var(--card);border:1px solid var(--paper-line);
+    border-radius:14px;padding:30px 26px;
+  }
+  .login-card .brand{justify-content:center;margin-bottom:18px;}
+  .login-card .brand h1{font-size:18px;}
+  .footnote{font-size:11px;color:var(--ink-soft);text-align:center;margin-top:16px;line-height:1.5;}
+
+  @media (max-width:520px){
+    .stat-grid{grid-template-columns:repeat(2,1fr);}
+    header{padding:12px 14px;}
+    .brand h1{font-size:14px;}
+    main{padding:0 12px 50px;}
+  }
+</style>
+</head>
+<body>
+
+<div id="root"></div>
+
+<script>
+const ADMIN_USER = "SATENDRA26";
+const ADMIN_PASS = "SATENDRA@2026";
+
+const DEFAULT_RATES = [
+  { id: "r1", name: "Copper Wire 1.5mm (Finolex)", unit: "per coil (90m)", price: 2450, updated: Date.now() },
+  { id: "r2", name: "Copper Wire 2.5mm (Finolex)", unit: "per coil (90m)", price: 3850, updated: Date.now() },
+  { id: "r3", name: "PVC Insulated Wire 1.0mm", unit: "per coil (90m)", price: 1650, updated: Date.now() },
+  { id: "r4", name: "Flexible Wire 4 core", unit: "per meter", price: 38, updated: Date.now() },
+  { id: "r5", name: "MCB 32A", unit: "per piece", price: 180, updated: Date.now() },
+  { id: "r6", name: "LED Bulb 9W", unit: "per piece", price: 65, updated: Date.now() }
+];
+
+// ---------- storage layer (with graceful fallback) ----------
+const hasCloudStorage = typeof window.storage !== "undefined" && window.storage;
+
+const Store = {
+  async get(key){
+    if (hasCloudStorage){
+      try{
+        const res = await window.storage.get(key, true);
+        return res ? res.value : null;
+      }catch(e){ return null; }
+    } else {
+      const v = localStorage.getItem("poonam_" + key);
+      return v;
+    }
+  },
+  async set(key, value){
+    if (hasCloudStorage){
+      try{ await window.storage.set(key, value, true); }catch(e){ console.error(e); }
+    } else {
+      localStorage.setItem("poonam_" + key, value);
+    }
+  }
+};
+
+// ---------- app state ----------
+let state = {
+  screen: "login",      // login | app
+  role: null,            // admin | staff
+  tab: "rates",          // rates | ledger | dashboard
+  rates: [],
+  ledger: [],
+  loginMode: "staff",
+  loginUser: "",
+  loginPass: "",
+  loginErr: "",
+  modal: null,           // {type:'rate'|'ledger', data}
+  ledgerFilter: "today",
+  lastSync: null
+};
+
+let pollHandle = null;
+let lastRatesJSON = "";
+let lastLedgerJSON = "";
+
+function fmtMoney(n){
+  const v = Number(n)||0;
+  return "₹" + v.toLocaleString("en-IN", {maximumFractionDigits:2});
+}
+function todayStr(){
+  const d = new Date();
+  return d.toISOString().slice(0,10);
+}
+function fmtTime(ts){
+  if(!ts) return "—";
+  const d = new Date(ts);
+  return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short"}) + " · " + d.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"});
+}
+
+async function loadAll(){
+  let r = await Store.get("rates");
+  let l = await Store.get("ledger");
+  if (!r){
+    r = JSON.stringify(DEFAULT_RATES);
+    await Store.set("rates", r);
+  }
+  if (!l){
+    l = JSON.stringify([]);
+    await Store.set("ledger", l);
+  }
+  state.rates = JSON.parse(r);
+  state.ledger = JSON.parse(l);
+  lastRatesJSON = r;
+  lastLedgerJSON = l;
+  state.lastSync = Date.now();
+}
+
+async function pollData(){
+  try{
+    const r = await Store.get("rates");
+    const l = await Store.get("ledger");
+    let changed = false;
+    if (r && r !== lastRatesJSON){ state.rates = JSON.parse(r); lastRatesJSON = r; changed = true; }
+    if (l && l !== lastLedgerJSON){ state.ledger = JSON.parse(l); lastLedgerJSON = l; changed = true; }
+    state.lastSync = Date.now();
+    if (changed) render();
+    else renderSyncOnly();
+  }catch(e){}
+}
+
+async function persistRates(){
+  const j = JSON.stringify(state.rates);
+  lastRatesJSON = j;
+  await Store.set("rates", j);
+}
+async function persistLedger(){
+  const j = JSON.stringify(state.ledger);
+  lastLedgerJSON = j;
+  await Store.set("ledger", j);
+}
+
+// ---------- icons ----------
+const ICONS = {
+  bolt: `<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z"/></svg>`,
+  edit: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>`,
+  trash: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>`,
+  plus: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>`
+};
+
+// ---------- rendering ----------
+const root = document.getElementById("root");
+
+function render(){
+  if (state.screen === "login"){
+    root.innerHTML = renderLogin();
+    bindLogin();
+    return;
+  }
+  root.innerHTML = renderApp();
+  bindApp();
+}
+
+function renderSyncOnly(){
+  const el = document.getElementById("syncTime");
+  if (el) el.textContent = "Synced " + fmtTime(state.lastSync);
+}
+
+function renderLogin(){
+  return `
+  <div class="center-screen">
+    <div class="login-card">
+      <div class="brand">
+        <div class="brand-mark">${ICONS.bolt}</div>
+        <div>
+          <h1>Poonam Electronics</h1>
+          <div class="sub" style="color:var(--ink-soft)">Shop Ledger &amp; Daily Rates</div>
+        </div>
+      </div>
+      <div class="login-tabs">
+        <button id="tabStaff" class="${state.loginMode==='staff'?'active':''}">Staff</button>
+        <button id="tabAdmin" class="${state.loginMode==='admin'?'active':''}">Admin</button>
+      </div>
+      ${ state.loginMode === 'staff' ? `
+        <p style="font-size:13px;color:var(--ink-soft);margin:0 0 18px;">View today's rates and add sales — no password needed.</p>
+        <button class="btn btn-copper" style="width:100%;justify-content:center;padding:11px;" id="staffEnter">Continue as Staff</button>
+      ` : `
+        <div class="field">
+          <label>Admin ID</label>
+          <input type="text" id="adminUser" placeholder="Enter admin ID" value="${state.loginUser}"/>
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input type="text" id="adminPass" placeholder="Enter password" value="${state.loginPass}"/>
+        </div>
+        <button class="btn btn-copper" style="width:100%;justify-content:center;padding:11px;" id="adminEnter">Login as Admin</button>
+        <div class="err">${state.loginErr}</div>
+      `}
+      <div class="footnote">${hasCloudStorage ? "Rates &amp; entries sync live to everyone using this app." : "Live sync needs this app open inside Claude — running in local-only mode right now."}</div>
+    </div>
+  </div>`;
+}
+
+function bindLogin(){
+  document.getElementById("tabStaff").onclick = ()=>{ state.loginMode='staff'; state.loginErr=''; render(); };
+  document.getElementById("tabAdmin").onclick = ()=>{ state.loginMode='admin'; state.loginErr=''; render(); };
+  const staffBtn = document.getElementById("staffEnter");
+  if (staffBtn) staffBtn.onclick = ()=>{ state.role='staff'; state.screen='app'; render(); startPolling(); };
+  const adminBtn = document.getElementById("adminEnter");
+  if (adminBtn){
+    adminBtn.onclick = ()=>{
+      const u = document.getElementById("adminUser").value.trim();
+      const p = document.getElementById("adminPass").value;
+      if (u === ADMIN_USER && p === ADMIN_PASS){
+        state.role='admin'; state.screen='app'; state.loginErr=''; render(); startPolling();
+      } else {
+        state.loginErr = "Incorrect admin ID or password.";
+        state.loginUser = u; state.loginPass = p;
+        render();
+      }
+    };
+  }
+}
+
+function startPolling(){
+  if (pollHandle) clearInterval(pollHandle);
+  pollHandle = setInterval(pollData, 4000);
+}
+
+function renderApp(){
+  return `
+  <div id="app">
+    <header>
+      <div class="brand">
+        <div class="brand-mark">${ICONS.bolt}</div>
+        <div>
+          <h1>Poonam Electronics</h1>
+          <div class="sub">Shop Ledger</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span class="role-chip ${state.role}">${state.role}</span>
+        <button class="hbtn" id="logoutBtn">Log out</button>
+      </div>
+    </header>
+    <nav>
+      <button class="tab ${state.tab==='rates'?'active':''}" data-tab="rates">Daily Rates</button>
+      <button class="tab ${state.tab==='ledger'?'active':''}" data-tab="ledger">Ledger</button>
+      <button class="tab ${state.tab==='dashboard'?'active':''}" data-tab="dashboard">Dashboard</button>
+    </nav>
+    <main>
+      <div class="panel">
+        ${state.tab==='rates' ? renderRatesTab() : state.tab==='ledger' ? renderLedgerTab() : renderDashboardTab()}
+      </div>
+      <div class="sync-row" style="margin-top:12px;justify-content:center;">
+        <span class="dot"></span><span id="syncTime">Synced ${fmtTime(state.lastSync)}</span>
+      </div>
+    </main>
+    ${state.modal ? renderModal() : ""}
+  </div>`;
+}
+
+function renderRatesTab(){
+  const isAdmin = state.role === 'admin';
+  const cards = state.rates.map(r => `
+    <div class="rate-card">
+      <div class="rate-name">${escapeHtml(r.name)}</div>
+      <div class="rate-unit">${escapeHtml(r.unit)}</div>
+      <div class="rate-price">${fmtMoney(r.price)}</div>
+      <div class="rate-updated">Updated ${fmtTime(r.updated)}</div>
+      ${isAdmin ? `
+        <div class="rate-actions">
+          <button class="btn btn-ghost btn-sm" data-edit-rate="${r.id}">${ICONS.edit} Edit</button>
+          <button class="btn btn-danger btn-sm" data-del-rate="${r.id}">${ICONS.trash}</button>
+        </div>` : ``}
+    </div>
+  `).join("");
+
+  return `
+    <div class="section-head">
+      <div>
+        <h2>Today's Rates</h2>
+        <p>${isAdmin ? "Tap edit to update a price — everyone sees it instantly." : "Updated live by the shop owner."}</p>
+      </div>
+      ${isAdmin ? `<button class="btn btn-copper" id="addRateBtn">${ICONS.plus} Add product</button>` : ``}
+    </div>
+    ${state.rates.length ? `<div class="rate-grid">${cards}</div>` : `<div class="empty">No products yet. ${isAdmin ? "Add your first product to start." : "Check back soon."}</div>`}
+  `;
+}
+
+function filteredLedger(){
+  if (state.ledgerFilter === 'today'){
+    const t = todayStr();
+    return state.ledger.filter(e => e.date === t);
+  }
+  return state.ledger;
+}
+
+function renderLedgerTab(){
+  const entries = filteredLedger().slice().sort((a,b)=> b.id.localeCompare(a.id));
+  const rows = entries.map(e => `
+    <tr>
+      <td class="mono" style="white-space:nowrap;">${e.date}</td>
+      <td><span class="tag ${e.type}">${e.type}</span></td>
+      <td>${escapeHtml(e.party||'—')}</td>
+      <td>${escapeHtml(e.note||'')}</td>
+      <td style="text-align:right;"><span class="amt ${e.type==='sale'?'pos':'neg'}">${e.type==='sale'?'+':'−'}${fmtMoney(e.amount)}</span></td>
+      ${state.role==='admin' ? `<td><button class="btn btn-danger btn-sm" data-del-ledger="${e.id}">${ICONS.trash}</button></td>` : `<td></td>`}
+    </tr>
+  `).join("");
+
+  return `
+    <div class="section-head">
+      <div>
+        <h2>Ledger</h2>
+        <p>Record sales, purchases and expenses as they happen.</p>
+      </div>
+      <button class="btn btn-copper" id="addLedgerBtn">${ICONS.plus} New entry</button>
+    </div>
+    <div class="toolbar">
+      <select id="ledgerFilter">
+        <option value="today" ${state.ledgerFilter==='today'?'selected':''}>Today</option>
+        <option value="all" ${state.ledgerFilter==='all'?'selected':''}>All entries</option>
+      </select>
+    </div>
+    ${entries.length ? `
+    <div style="overflow-x:auto;">
+    <table>
+      <thead><tr><th>Date</th><th>Type</th><th>Party</th><th>Note</th><th style="text-align:right;">Amount</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    </div>` : `<div class="empty">No entries ${state.ledgerFilter==='today'?'for today':'yet'}. Add one to get started.</div>`}
+  `;
+}
+
+function renderDashboardTab(){
+  const t = todayStr();
+  const todays = state.ledger.filter(e=>e.date===t);
+  const sum = (type)=> todays.filter(e=>e.type===type).reduce((s,e)=>s+Number(e.amount||0),0);
+  const sales = sum('sale'), purchases = sum('purchase'), expenses = sum('expense');
+  const net = sales - purchases - expenses;
+  return `
+    <div class="section-head">
+      <div><h2>Today's Summary</h2><p>${new Date().toLocaleDateString('en-IN',{weekday:'long', day:'numeric', month:'long'})}</p></div>
+    </div>
+    <div class="stat-grid">
+      <div class="stat sale"><div class="label">Sales</div><div class="value">${fmtMoney(sales)}</div></div>
+      <div class="stat purchase"><div class="label">Purchases</div><div class="value">${fmtMoney(purchases)}</div></div>
+      <div class="stat expense"><div class="label">Expenses</div><div class="value">${fmtMoney(expenses)}</div></div>
+      <div class="stat"><div class="label">Net</div><div class="value" style="color:${net>=0?'var(--green)':'var(--red)'}">${fmtMoney(net)}</div></div>
+    </div>
+    <div class="section-head"><div><h2>Catalogue</h2><p>${state.rates.length} products tracked on the rate card.</p></div></div>
+  `;
+}
+
+function renderModal(){
+  const m = state.modal;
+  if (m.type === 'rate'){
+    const d = m.data || {name:"",unit:"",price:""};
+    return `
+    <div class="overlay" id="overlay">
+      <div class="modal">
+        <h3>${d.id ? 'Edit product' : 'Add product'}</h3>
+        <p class="desc">${d.id ? 'Update the price — staff will see it the moment you save.' : 'Add a new item to the daily rate card.'}</p>
+        <div class="field"><label>Product name</label><input type="text" id="mName" value="${escapeAttr(d.name)}" placeholder="e.g. Copper Wire 1.5mm"/></div>
+        <div class="field"><label>Unit</label><input type="text" id="mUnit" value="${escapeAttr(d.unit)}" placeholder="e.g. per coil (90m)"/></div>
+        <div class="field"><label>Price (₹)</label><input type="number" id="mPrice" value="${d.price ?? ''}" placeholder="0"/></div>
+        <div class="err" id="modalErr"></div>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" id="modalCancel">Cancel</button>
+          <button class="btn btn-copper" id="modalSave">${d.id ? 'Save changes' : 'Add product'}</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  if (m.type === 'ledger'){
+    return `
+    <div class="overlay" id="overlay">
+      <div class="modal">
+        <h3>New ledger entry</h3>
+        <p class="desc">Log a sale, purchase or expense.</p>
+        <div class="field"><label>Type</label>
+          <select id="mType">
+            <option value="sale">Sale</option>
+            <option value="purchase">Purchase</option>
+            <option value="expense">Expense</option>
+          </select>
+        </div>
+        <div class="field"><label>Date</label><input type="date" id="mDate" value="${todayStr()}"/></div>
+        <div class="field"><label>Party / customer name</label><input type="text" id="mParty" placeholder="e.g. Ramesh Hardware"/></div>
+        <div class="field"><label>Amount (₹)</label><input type="number" id="mAmount" placeholder="0"/></div>
+        <div class="field"><label>Note (optional)</label><input type="text" id="mNote" placeholder="e.g. 2 coils copper wire"/></div>
+        <div class="err" id="modalErr"></div>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" id="modalCancel">Cancel</button>
+          <button class="btn btn-copper" id="modalSave">Save entry</button>
+        </div>
+      </div>
+    </div>`;
+  }
+  return "";
+}
+
+function escapeHtml(s){
+  return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function escapeAttr(s){ return escapeHtml(s); }
+
+// ---------- event binding ----------
+function bindApp(){
+  document.getElementById("logoutBtn").onclick = ()=>{
+    if (pollHandle) clearInterval(pollHandle);
+    state.screen='login'; state.role=null; state.loginPass=''; state.loginUser=''; state.loginErr='';
+    render();
+  };
+  document.querySelectorAll(".tab").forEach(b=>{
+    b.onclick = ()=>{ state.tab = b.dataset.tab; render(); };
+  });
+
+  if (state.tab === 'rates'){
+    const addBtn = document.getElementById("addRateBtn");
+    if (addBtn) addBtn.onclick = ()=>{ state.modal = {type:'rate', data:{}}; render(); };
+    document.querySelectorAll("[data-edit-rate]").forEach(b=>{
+      b.onclick = ()=>{
+        const id = b.dataset.editRate;
+        const item = state.rates.find(r=>r.id===id);
+        state.modal = {type:'rate', data: Object.assign({}, item)};
+        render();
+      };
+    });
+    document.querySelectorAll("[data-del-rate]").forEach(b=>{
+      b.onclick = async ()=>{
+        const id = b.dataset.delRate;
+        if (!confirm("Remove this product from the rate card?")) return;
+        state.rates = state.rates.filter(r=>r.id!==id);
+        await persistRates();
+        render();
+      };
+    });
+  }
+
+  if (state.tab === 'ledger'){
+    document.getElementById("addLedgerBtn").onclick = ()=>{ state.modal = {type:'ledger', data:{}}; render(); };
+    document.getElementById("ledgerFilter").onchange = (e)=>{ state.ledgerFilter = e.target.value; render(); };
+    document.querySelectorAll("[data-del-ledger]").forEach(b=>{
+      b.onclick = async ()=>{
+        const id = b.dataset.delLedger;
+        if (!confirm("Delete this entry?")) return;
+        state.ledger = state.ledger.filter(e=>e.id!==id);
+        await persistLedger();
+        render();
+      };
+    });
+  }
+
+  if (state.modal) bindModal();
+}
+
+function bindModal(){
+  const overlay = document.getElementById("overlay");
+  overlay.addEventListener("click", (e)=>{ if (e.target === overlay){ state.modal=null; render(); } });
+  document.getElementById("modalCancel").onclick = ()=>{ state.modal=null; render(); };
+
+  const m = state.modal;
+  document.getElementById("modalSave").onclick = async ()=>{
+    const errEl = document.getElementById("modalErr");
+    if (m.type === 'rate'){
+      const name = document.getElementById("mName").value.trim();
+      const unit = document.getElementById("mUnit").value.trim();
+      const price = parseFloat(document.getElementById("mPrice").value);
+      if (!name || !unit || isNaN(price) || price < 0){
+        errEl.textContent = "Please fill in name, unit and a valid price.";
+        return;
+      }
+      if (m.data.id){
+        const item = state.rates.find(r=>r.id===m.data.id);
+        item.name=name; item.unit=unit; item.price=price; item.updated=Date.now();
+      } else {
+        state.rates.push({ id: 'r'+Date.now(), name, unit, price, updated: Date.now() });
+      }
+      await persistRates();
+      state.modal = null;
+      render();
+    } else if (m.type === 'ledger'){
+      const type = document.getElementById("mType").value;
+      const date = document.getElementById("mDate").value || todayStr();
+      const party = document.getElementById("mParty").value.trim();
+      const amount = parseFloat(document.getElementById("mAmount").value);
+      const note = document.getElementById("mNote").value.trim();
+      if (isNaN(amount) || amount <= 0){
+        errEl.textContent = "Please enter a valid amount.";
+        return;
+      }
+      state.ledger.push({ id: 'l'+Date.now(), type, date, party, amount, note });
+      await persistLedger();
+      state.modal = null;
+      render();
+    }
+  };
+}
+
+// ---------- boot ----------
+(async function init(){
+  root.innerHTML = `<div class="center-screen"><div style="color:#6B5E4D;font-family:'Inter',sans-serif;font-size:13px;">Loading Poonam Electronics…</div></div>`;
+  await loadAll();
+  render();
+})();
+</script>
+</body>
+</html>
