@@ -1,6 +1,6 @@
 {
   "name": "Poonam Electronics - Shop Ledger",
-  "short_name": "Poonam Electronics",
+  "short_name": "PE",
   "description": "Real-time accounting, daily rates, billing and ledger for Poonam Electronics",
   "start_url": "./index.html",
   "scope": "./",
