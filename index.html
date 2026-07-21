@@ -1061,8 +1061,8 @@ function renderRatesTab(){
   `).join("");
   return `
     <div class="section-head">
-      <div><h2>Today's Rates</h2><p>Only products marked "Show on Daily Rates" appear here. New products are created in the Products tab — use Add here to publish an existing one.</p></div>
-      ${canManage ? `<button class="btn btn-copper" id="addRateBtnFromDaily">${ICONS.plus} Add from Products</button>` : ``}
+      <div><h2>Today's Rates</h2><p>Only products with "Show on Daily Rates" ticked appear here — every product still lives in the Products tab either way.</p></div>
+      ${canManage ? `<div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn btn-ghost" id="addRateBtnFromDaily">${ICONS.plus} Add from Products</button><button class="btn btn-copper" id="addNewProductFromDaily">${ICONS.plus} New product</button></div>` : ``}
     </div>
     <div class="toolbar">${searchBoxHtml('ratesSearch', state.ratesSearch, 'Search products…')}</div>
     ${visibleRates.length ? `<div class="rate-grid">${cards}</div>` : `<div class="empty">${state.ratesSearch ? 'No products found matching "'+escapeHtml(state.ratesSearch)+'".' : 'No products marked for Daily Rates yet.'}</div>`}
@@ -1486,7 +1486,7 @@ function renderModal(){
 
   if (m.type === 'rate'){
     const d = m.data || {name:"",unit:"",price:""};
-    const isVisible = d.visible !== false;
+    const isVisible = d.visible === true;
     return `
     <div class="overlay" id="overlay">
       <div class="modal">
@@ -1499,6 +1499,7 @@ function renderModal(){
           <input type="checkbox" id="mVisible" style="width:auto;" ${isVisible ? 'checked' : ''}/>
           <label style="margin:0;" for="mVisible">Show on Daily Rates tab</label>
         </div>
+        <p style="font-size:11px;color:var(--ink-soft);margin:-6px 0 12px;">Every product always appears here in Products. This box is off by default — tick it only if you also want it on the Daily Rates tab.</p>
         <datalist id="unitOptionsList">${UNIT_OPTIONS.map(u=>`<option value="${u}"></option>`).join('')}</datalist>
         <div class="err" id="modalErr"></div>
         <div class="modal-actions">
@@ -1793,6 +1794,8 @@ function bindApp(){
   if (state.tab === 'rates'){
     const addBtnDaily = document.getElementById("addRateBtnFromDaily");
     if (addBtnDaily) addBtnDaily.onclick = ()=>{ state.modal = {type:'pickDailyRate', data:{search:''}}; render(); };
+    const addNewFromDaily = document.getElementById("addNewProductFromDaily");
+    if (addNewFromDaily) addNewFromDaily.onclick = ()=>{ state.modal = {type:'rate', data:{}}; render(); };
     const rSearch = document.getElementById("ratesSearch");
     if (rSearch){ rSearch.oninput = (e)=>{ state.ratesSearch = e.target.value; render(); }; }
   }
