@@ -298,6 +298,7 @@ function checkPin(username, pin){ return localStorage.getItem(pinKeyFor(username
 
 const UNIT_OPTIONS = ["pc","bundle","meter","ft","inch","coil","box","roll","set","kg","gram","litre","dozen","pair","sq.ft","packet"];
 const PAYMENT_MODES = ["Cash","UPI","Udhaar","Custom"];
+const SETTLE_PAYMENT_MODES = ["Cash","UPI","Cheque","Bank Transfer","Custom"];
 
 const DEFAULT_RATES = [
   { id: "r1", name: "Copper Wire 1.5mm (Finolex)", unit: "coil", price: 2450, updated: Date.now(), visible: true },
@@ -521,7 +522,11 @@ function paymentModeLabel(e){
   if (e.paymentMode === 'Custom') return escapeHtml(e.customPaymentMode || 'Custom');
   return escapeHtml(e.paymentMode);
 }
-function isUdhaar(e){ return e && e.paymentMode === 'Udhaar'; }
+function recordTotal(e){ return Number(e.totalAmount != null ? e.totalAmount : e.amount) || 0; }
+function paidSoFar(e){ return Number(e.paidAmount) || 0; }
+function remainingDue(e){ return Math.max(0, Math.round((recordTotal(e) - paidSoFar(e)) * 100) / 100); }
+function isFullySettled(e){ return e.paymentMode === 'Udhaar' && remainingDue(e) <= 0.004; }
+function isUdhaar(e){ return e && e.paymentMode === 'Udhaar' && remainingDue(e) > 0.004; }
 
 // ---------- icons ----------
 const ICONS = {
@@ -558,6 +563,39 @@ function pdfAddImage(doc, base64, y){
     return y + h + 12;
   }catch(e){ return y; }
 }
+function pdfAddUdhaarHistory(doc, record, y){
+  if (record.paymentMode !== 'Udhaar') return y;
+  if (y > 250){ doc.addPage(); y = 20; }
+  doc.setFont("helvetica","bold"); doc.setFontSize(11);
+  doc.text("Udhaar (Credit) Payment History", 14, y);
+  y += 7;
+  doc.setDrawColor(200,200,200); doc.setLineWidth(0.2); doc.line(14, y, 196, y);
+  y += 6;
+  doc.setFontSize(10);
+  const payments = record.payments || [];
+  if (!payments.length){
+    doc.setFont("helvetica","normal");
+    doc.text("No payments received yet.", 14, y);
+    y += 7;
+  } else {
+    payments.forEach(p=>{
+      if (y > 280){ doc.addPage(); y = 20; }
+      doc.setFont("helvetica","normal");
+      const mode = p.mode === 'Custom' ? (p.customMode || 'Custom') : p.mode;
+      doc.text(mode + "  —  " + fmtMoney(p.amount) + "  —  " + fmtTime(p.timestamp), 14, y);
+      y += 7;
+    });
+  }
+  const due = remainingDue(record);
+  doc.setFont("helvetica","bold");
+  if (isFullySettled(record)){
+    doc.text("Status: Fully paid" + (record.settledAt ? " on " + fmtTime(record.settledAt) : ""), 14, y);
+  } else {
+    doc.text("Status: " + fmtMoney(due) + " still due", 14, y);
+  }
+  y += 10;
+  return y;
+}
 
 function downloadEntryInvoice(e){
   const { jsPDF } = window.jspdf;
@@ -581,6 +619,7 @@ function downloadEntryInvoice(e){
     y += 9;
   });
   if (e.image) y = pdfAddImage(doc, e.image, y+4);
+  y = pdfAddUdhaarHistory(doc, e, y+2);
   doc.save("Poonam-Electronics-Entry-" + e.date + ".pdf");
 }
 
@@ -629,6 +668,7 @@ function downloadBillInvoice(b){
   y += 10;
   if (b.note){ doc.setFontSize(10); doc.setFont("helvetica","normal"); doc.text("Note: " + b.note, 14, y); y += 8; }
   if (b.image) y = pdfAddImage(doc, b.image, y+2);
+  y = pdfAddUdhaarHistory(doc, b, y+2);
   doc.save("Poonam-Electronics-Invoice-" + b.date + "-" + String(b.id).slice(-6) + ".pdf");
 }
 
@@ -1047,7 +1087,7 @@ function renderLedgerTab(){
       <td class="mono" style="white-space:nowrap;">${e.date}</td>
       <td><span class="tag ${e.type}">${e.type}</span></td>
       <td>${escapeHtml(e.party||'—')}${e.image ? ' <span title="Has photo">📷</span>' : ''}</td>
-      <td>${isUdhaar(e) ? `<span class="tag udhaar">Udhaar</span>` : paymentModeLabel(e)}</td>
+      <td>${e.paymentMode==='Udhaar' ? `<span class="tag udhaar">${isFullySettled(e) ? 'Udhaar ✓' : 'Udhaar'}</span>` : paymentModeLabel(e)}</td>
       <td style="text-align:right;"><span class="amt ${e.type==='sale'?'pos':'neg'}">${e.type==='sale'?'+':'−'}${fmtMoney(e.amount)}</span></td>
     </tr>
   `).join("");
@@ -1092,7 +1132,7 @@ function renderLongLedgerTab(){
       <td class="mono" style="white-space:nowrap;">${b.date}</td>
       <td>${escapeHtml(b.customerName||'—')}${b.image ? ' <span title="Has photo">📷</span>' : ''}</td>
       <td>${(b.items||[]).length} item${(b.items||[]).length===1?'':'s'}</td>
-      <td>${isUdhaar(b) ? `<span class="tag udhaar">Udhaar</span>` : paymentModeLabel(b)}</td>
+      <td>${b.paymentMode==='Udhaar' ? `<span class="tag udhaar">${isFullySettled(b) ? 'Udhaar ✓' : 'Udhaar'}</span>` : paymentModeLabel(b)}</td>
       <td style="text-align:right;"><span class="amt mono">${fmtMoney(b.totalAmount)}</span></td>
     </tr>
   `).join("");
@@ -1117,8 +1157,8 @@ function renderLongLedgerTab(){
 }
 
 function udhaarEntries(){
-  let ledgerDue = state.ledger.filter(isUdhaar).map(e => ({ kind:'ledger', id:e.id, date:e.date, timestamp:e.timestamp, name:e.party||'—', amount:e.amount, ref:e }));
-  let billDue = state.longLedger.filter(isUdhaar).map(b => ({ kind:'bill', id:b.id, date:b.date, timestamp:b.timestamp, name:b.customerName||'—', amount:b.totalAmount, ref:b }));
+  let ledgerDue = state.ledger.filter(isUdhaar).map(e => ({ kind:'ledger', id:e.id, date:e.date, timestamp:e.timestamp, name:e.party||'—', total:recordTotal(e), paid:paidSoFar(e), due:remainingDue(e), ref:e }));
+  let billDue = state.longLedger.filter(isUdhaar).map(b => ({ kind:'bill', id:b.id, date:b.date, timestamp:b.timestamp, name:b.customerName||'—', total:recordTotal(b), paid:paidSoFar(b), due:remainingDue(b), ref:b }));
   let all = ledgerDue.concat(billDue);
   if (state.udhaarSearch && state.udhaarSearch.trim()){
     const q = state.udhaarSearch.trim().toLowerCase();
@@ -1132,23 +1172,25 @@ function udhaarEntries(){
 
 function renderUdhaarTab(){
   const rows = udhaarEntries();
-  const total = rows.reduce((s,r)=> s + Number(r.amount||0), 0);
+  const totalDue = rows.reduce((s,r)=> s + r.due, 0);
+  const totalPaid = rows.reduce((s,r)=> s + r.paid, 0);
   const trs = rows.map(r => `
-    <tr data-udhaar-kind="${r.kind}" data-udhaar-id="${r.id}" style="cursor:pointer;">
-      <td class="mono" style="white-space:nowrap;">${r.date}</td>
-      <td>${escapeHtml(r.name)}</td>
-      <td><span class="tag ${r.kind==='ledger'?'sale':'purchase'}">${r.kind==='ledger'?'Entry':'Bill'}</span></td>
-      <td class="mono" style="font-size:11px;color:var(--ink-soft);">${fmtTime(r.timestamp)}</td>
-      <td style="text-align:right;"><span class="amt neg mono">${fmtMoney(r.amount)}</span></td>
+    <tr>
+      <td class="mono" style="white-space:nowrap;cursor:pointer;" data-udhaar-kind="${r.kind}" data-udhaar-id="${r.id}">${r.date}</td>
+      <td style="cursor:pointer;" data-udhaar-kind="${r.kind}" data-udhaar-id="${r.id}">${escapeHtml(r.name)}</td>
+      <td style="cursor:pointer;" data-udhaar-kind="${r.kind}" data-udhaar-id="${r.id}"><span class="tag ${r.kind==='ledger'?'sale':'purchase'}">${r.kind==='ledger'?'Entry':'Bill'}</span></td>
+      <td style="text-align:right;">${r.paid>0 ? `<div style="font-size:10.5px;color:var(--ink-soft);">Paid ${fmtMoney(r.paid)} of ${fmtMoney(r.total)}</div>` : ''}<span class="amt neg mono">${fmtMoney(r.due)} due</span></td>
+      <td style="white-space:nowrap;"><button class="btn btn-copper btn-sm" data-pay-kind="${r.kind}" data-pay-id="${r.id}">Payment received</button></td>
     </tr>
   `).join("");
   return `
     <div class="section-head">
-      <div><h2>Udhaar</h2><p>Every ledger entry and bill marked with payment mode "Udhaar" — the running credit / due register.</p></div>
+      <div><h2>Udhaar</h2><p>Every ledger entry and bill marked with payment mode "Udhaar" — the running credit / due register. Fully paid ones move into the Ledger / Long Ledger automatically.</p></div>
     </div>
     <div class="stat-grid" style="margin-bottom:14px;">
-      <div class="stat expense"><div class="label">Total Udhaar Due</div><div class="value">${fmtMoney(total)}</div></div>
-      <div class="stat"><div class="label">Records</div><div class="value">${rows.length}</div></div>
+      <div class="stat expense"><div class="label">Total Still Due</div><div class="value">${fmtMoney(totalDue)}</div></div>
+      <div class="stat sale"><div class="label">Received so far</div><div class="value">${fmtMoney(totalPaid)}</div></div>
+      <div class="stat"><div class="label">Open records</div><div class="value">${rows.length}</div></div>
     </div>
     <div class="toolbar">
       <div style="flex:1;min-width:160px;position:relative;">
@@ -1157,8 +1199,15 @@ function renderUdhaarTab(){
         <span style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:#aaa;font-size:13px;">🔍</span>
       </div>
     </div>
-    ${rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Date</th><th>Name</th><th>Type</th><th>Time</th><th style="text-align:right;">Amount</th></tr></thead><tbody>${trs}</tbody></table></div>` : `<div class="empty">No Udhaar (credit) records yet. Mark an invoice's payment mode as "Udhaar" to see it here.</div>`}
+    ${rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Date</th><th>Name</th><th>Type</th><th style="text-align:right;">Due</th><th></th></tr></thead><tbody>${trs}</tbody></table></div>` : `<div class="empty">No Udhaar (credit) records yet. Mark an invoice's payment mode as "Udhaar" to see it here.</div>`}
   `;
+}
+
+function openUdhaarPaymentModal(kind, id){
+  const ref = kind === 'ledger' ? state.ledger.find(e=>e.id===id) : state.longLedger.find(b=>b.id===id);
+  if (!ref) return;
+  state.modal = { type:'udhaarPayment', data: { kind, id, mode:'', customMode:'', amount: remainingDue(ref) } };
+  render();
 }
 
 function renderDashboardTab(){
@@ -1277,6 +1326,10 @@ function syncOpenModalFromDom(){
     syncLongLedgerItemsFromDom();
     if (getVal("mPaymentMode") !== undefined) m.data.paymentMode = getVal("mPaymentMode");
     if (getVal("mCustomPaymentMode") !== undefined) m.data.customPaymentMode = getVal("mCustomPaymentMode");
+  } else if (m.type === 'udhaarPayment'){
+    if (getVal("mSettleMode") !== undefined) m.data.mode = getVal("mSettleMode");
+    if (getVal("mSettleCustomMode") !== undefined) m.data.customMode = getVal("mSettleCustomMode");
+    if (getVal("mSettleAmount") !== undefined) m.data.amount = getVal("mSettleAmount");
   } else if (m.type === 'staff'){
     if (getVal("mStaffName") !== undefined) m.data.name = getVal("mStaffName");
     if (getVal("mStaffUser") !== undefined) m.data.username = getVal("mStaffUser");
@@ -1363,6 +1416,30 @@ function autofillLineFromProduct(idx){
 }
 
 // ---------- modal rendering ----------
+function renderPaymentHistoryBlock(e){
+  if (e.paymentMode !== 'Udhaar') return '';
+  const payments = e.payments || [];
+  const due = remainingDue(e);
+  const settled = isFullySettled(e);
+  const paymentRows = payments.map(p => `
+    <div style="font-size:12.5px;display:flex;justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid var(--paper-line);">
+      <span>${escapeHtml(p.mode === 'Custom' ? (p.customMode||'Custom') : p.mode)}</span>
+      <span class="mono">${fmtMoney(p.amount)}</span>
+      <span style="color:var(--ink-soft);">${fmtTime(p.timestamp)}</span>
+    </div>
+  `).join("");
+  return `
+    <div style="margin-top:4px;padding:10px 12px;border:1px solid var(--paper-line);border-radius:9px;background:#FBF8F0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <strong style="font-size:12.5px;">${settled ? 'Udhaar — Fully Settled' : 'Udhaar — Payment Status'}</strong>
+        <span class="${settled ? 'amt pos' : 'amt neg'} mono" style="font-size:13px;">${settled ? 'Paid in full' : fmtMoney(due) + ' due'}</span>
+      </div>
+      ${payments.length ? `<div style="margin-top:8px;">${paymentRows}</div>` : `<div style="font-size:12px;color:var(--ink-soft);margin-top:6px;">No payments received yet.</div>`}
+      ${settled && e.settledAt ? `<div style="font-size:11px;color:var(--ink-soft);margin-top:6px;">Fully paid on ${fmtTime(e.settledAt)}</div>` : ``}
+    </div>
+  `;
+}
+
 function renderModal(){
   const m = state.modal;
 
@@ -1501,7 +1578,7 @@ function renderModal(){
     <div class="overlay" id="overlay">
       <div class="modal">
         <h3>Entry details</h3>
-        <p class="desc"><span class="tag ${e.type}">${e.type}</span>${isUdhaar(e) ? ` <span class="tag udhaar">Udhaar</span>` : ``}</p>
+        <p class="desc"><span class="tag ${e.type}">${e.type}</span>${e.paymentMode==='Udhaar' ? ` <span class="tag udhaar">${isFullySettled(e) ? 'Udhaar (Settled)' : 'Udhaar'}</span>` : ``}</p>
         <div style="display:flex;flex-direction:column;gap:10px;font-size:13.5px;margin-bottom:6px;">
           <div><strong>Amount:</strong> <span class="amt ${e.type==='sale'?'pos':'neg'} mono">${e.type==='sale'?'+':'−'}${fmtMoney(e.amount)}</span></div>
           <div><strong>Date:</strong> ${e.date}</div>
@@ -1511,10 +1588,12 @@ function renderModal(){
           <div><strong>Added by:</strong> ${escapeHtml(e.createdBy || 'Admin')}</div>
           <div><strong>Created:</strong> ${fmtTime(e.timestamp)}</div>
           ${e.image ? `<div><strong>Photo:</strong><br/><img src="${e.image}" class="img-thumb" id="detailImgThumb"/></div>` : ``}
+          ${renderPaymentHistoryBlock(e)}
         </div>
         <div class="modal-actions">
           <button class="btn btn-ghost" id="modalCancel">Close</button>
           <button class="btn btn-ghost" id="detailDownload">${ICONS.download} Invoice</button>
+          ${isUdhaar(e) ? `<button class="btn btn-copper" id="detailRecordPayment">Payment received</button>` : ``}
           ${canMod ? `<button class="btn btn-ghost" id="detailEdit">${ICONS.edit} Edit</button>` : ``}
           ${canMod ? `<button class="btn btn-danger" id="detailDelete">${ICONS.trash} Delete</button>` : ``}
         </div>
@@ -1532,7 +1611,7 @@ function renderModal(){
     <div class="overlay" id="overlay">
       <div class="modal wide">
         <h3>Bill details</h3>
-        <p class="desc">${b.date} · Bill #${String(b.id).slice(-6).toUpperCase()}${isUdhaar(b) ? ` · <span class="tag udhaar">Udhaar</span>` : ``}</p>
+        <p class="desc">${b.date} · Bill #${String(b.id).slice(-6).toUpperCase()}${b.paymentMode==='Udhaar' ? ` · <span class="tag udhaar">${isFullySettled(b) ? 'Udhaar (Settled)' : 'Udhaar'}</span>` : ``}</p>
         <div style="font-size:13.5px;margin-bottom:12px;line-height:1.6;">
           <div><strong>Customer:</strong> ${escapeHtml(b.customerName||'—')}</div>
           ${b.customerPhone ? `<div><strong>Phone:</strong> ${escapeHtml(b.customerPhone)}</div>` : ``}
@@ -1545,11 +1624,42 @@ function renderModal(){
         <div class="grand-total-row" style="margin-top:10px;"><span>Grand Total</span><span class="val">${fmtMoney(b.totalAmount)}</span></div>
         ${b.note ? `<p style="font-size:12.5px;color:var(--ink-soft);margin-top:10px;"><strong>Note:</strong> ${escapeHtml(b.note)}</p>` : ``}
         ${b.image ? `<div style="margin-top:10px;"><strong style="font-size:13px;">Photo:</strong><br/><img src="${b.image}" class="img-thumb" id="detailImgThumb"/></div>` : ``}
+        ${renderPaymentHistoryBlock(b)}
         <div class="modal-actions">
           <button class="btn btn-ghost" id="modalCancel">Close</button>
           <button class="btn btn-ghost" id="detailDownload">${ICONS.download} Invoice</button>
+          ${isUdhaar(b) ? `<button class="btn btn-copper" id="detailRecordPayment">Payment received</button>` : ``}
           ${canMod ? `<button class="btn btn-ghost" id="detailEdit">${ICONS.edit} Edit</button>` : ``}
           ${canMod ? `<button class="btn btn-danger" id="detailDelete">${ICONS.trash} Delete</button>` : ``}
+        </div>
+      </div>
+    </div>`;
+  }
+
+  if (m.type === 'udhaarPayment'){
+    const d = m.data || {};
+    const ref = d.kind === 'ledger' ? state.ledger.find(e=>e.id===d.id) : state.longLedger.find(b=>b.id===d.id);
+    if (!ref) return "";
+    const due = remainingDue(ref);
+    const who = d.kind === 'ledger' ? (ref.party || '—') : (ref.customerName || '—');
+    return `
+    <div class="overlay" id="overlay">
+      <div class="modal">
+        <h3>Payment received</h3>
+        <p class="desc">${escapeHtml(who)} — ${fmtMoney(due)} currently due.</p>
+        <div class="field"><label>Payment mode</label>
+          <select id="mSettleMode">
+            <option value="">Select payment mode</option>
+            ${SETTLE_PAYMENT_MODES.map(p=>`<option value="${p}" ${d.mode===p?'selected':''}>${p}</option>`).join('')}
+          </select>
+        </div>
+        ${d.mode === 'Custom' ? `<div class="field"><label>Custom payment mode</label><input type="text" id="mSettleCustomMode" value="${escapeAttr(d.customMode||'')}" placeholder="e.g. Bank transfer"/></div>` : ``}
+        <div class="field"><label>Amount received (₹)</label><input type="number" id="mSettleAmount" value="${d.amount ?? due}" placeholder="0"/></div>
+        <p style="font-size:11.5px;color:var(--ink-soft);margin:-4px 0 0;">If this is less than the full due amount, the invoice stays in Udhaar with the remaining balance. If it covers the full due amount, the invoice moves out of Udhaar automatically.</p>
+        <div class="err" id="modalErr"></div>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" id="modalCancel">Cancel</button>
+          <button class="btn btn-copper" id="modalSave">Save payment</button>
         </div>
       </div>
     </div>`;
@@ -1660,10 +1770,10 @@ function bindApp(){
   if (state.tab === 'udhaar'){
     const uSearch = document.getElementById("udhaarSearch");
     if (uSearch){ uSearch.oninput = (e)=>{ state.udhaarSearch = e.target.value; render(); }; }
-    document.querySelectorAll("[data-udhaar-id]").forEach(tr=>{
-      tr.onclick = ()=>{
-        const id = tr.dataset.udhaarId;
-        const kind = tr.dataset.udhaarKind;
+    document.querySelectorAll("[data-udhaar-id]").forEach(el=>{
+      el.onclick = ()=>{
+        const id = el.dataset.udhaarId;
+        const kind = el.dataset.udhaarKind;
         if (kind === 'ledger'){
           const entry = state.ledger.find(e=>e.id===id);
           if (entry) { state.modal = {type:'entryDetail', data: entry}; render(); }
@@ -1671,6 +1781,14 @@ function bindApp(){
           const bill = state.longLedger.find(b=>b.id===id);
           if (bill) { state.modal = {type:'billDetail', data: bill}; render(); }
         }
+      };
+    });
+    document.querySelectorAll("[data-pay-id]").forEach(btn=>{
+      btn.onclick = (ev)=>{
+        ev.stopPropagation();
+        const id = btn.dataset.payId;
+        const kind = btn.dataset.payKind;
+        openUdhaarPaymentModal(kind, id);
       };
     });
   }
@@ -1780,6 +1898,46 @@ function bindModal(){
       if (!confirm("Delete this entry? This can't be undone.")) return;
       const node = m.type === 'entryDetail' ? 'ledger' : 'longLedger';
       await dbRemove(node, m.data.id);
+      state.modal = null;
+      render();
+    };
+    const payBtn = document.getElementById("detailRecordPayment");
+    if (payBtn) payBtn.onclick = ()=>{
+      openUdhaarPaymentModal(m.type === 'entryDetail' ? 'ledger' : 'bill', m.data.id);
+    };
+    return;
+  }
+
+  if (m.type === 'udhaarPayment'){
+    const modeSel = document.getElementById("mSettleMode");
+    if (modeSel) modeSel.onchange = ()=>{
+      m.data.mode = modeSel.value;
+      const amtEl = document.getElementById("mSettleAmount");
+      if (amtEl) m.data.amount = amtEl.value;
+      const cmEl = document.getElementById("mSettleCustomMode");
+      if (cmEl) m.data.customMode = cmEl.value;
+      render();
+    };
+    const saveBtn = document.getElementById("modalSave");
+    if (saveBtn) saveBtn.onclick = async ()=>{
+      const errEl = document.getElementById("modalErr");
+      const mode = document.getElementById("mSettleMode").value;
+      const customMode = document.getElementById("mSettleCustomMode") ? document.getElementById("mSettleCustomMode").value.trim() : '';
+      const amount = parseFloat(document.getElementById("mSettleAmount").value);
+      if (!mode){ errEl.textContent = "Please choose a payment mode."; return; }
+      if (mode === 'Custom' && !customMode){ errEl.textContent = "Please name the custom payment mode."; return; }
+      if (isNaN(amount) || amount <= 0){ errEl.textContent = "Please enter a valid amount received."; return; }
+      const node = m.data.kind === 'ledger' ? 'ledger' : 'longLedger';
+      const ref = m.data.kind === 'ledger' ? state.ledger.find(e=>e.id===m.data.id) : state.longLedger.find(b=>b.id===m.data.id);
+      if (!ref){ errEl.textContent = "This record could no longer be found."; return; }
+      const due = remainingDue(ref);
+      if (amount > due + 0.01){ errEl.textContent = "That's more than the amount currently due (" + fmtMoney(due) + ")."; return; }
+      const payments = (ref.payments || []).concat([{ mode, customMode: mode==='Custom' ? customMode : '', amount, timestamp: Date.now() }]);
+      const newPaid = (Number(ref.paidAmount)||0) + amount;
+      const total = recordTotal(ref);
+      const patch = { payments, paidAmount: newPaid };
+      if (newPaid >= total - 0.004) patch.settledAt = Date.now();
+      await dbUpdate(node, ref.id, patch);
       state.modal = null;
       render();
     };
