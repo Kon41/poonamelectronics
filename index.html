@@ -493,6 +493,9 @@ let state = {
   ledgerSearch: "",
   longLedgerSearch: "",
   udhaarSearch: "",
+  ratesSearch: "",
+  productsSearch: "",
+  pickerSearch: "",
   lastSync: null,
   cleanupConfirmText: "",
   busy: false,
@@ -770,7 +773,8 @@ function render(){
   bindApp();
   if (state.lightboxImg) bindLightbox();
   // Restore focus + cursor position to search input after rebuild
-  if (focusedId === 'ledgerSearch' || focusedId === 'longLedgerSearch' || focusedId === 'udhaarSearch'){
+  const searchInputIds = ['ledgerSearch','longLedgerSearch','udhaarSearch','ratesSearch','productsSearch','pickerSearchInput'];
+  if (searchInputIds.includes(focusedId)){
     const el = document.getElementById(focusedId);
     if (el){ el.focus(); const len = el.value.length; el.setSelectionRange(len, len); }
   }
@@ -1031,9 +1035,22 @@ function bindLightbox(){
   lb.addEventListener("click", (e)=>{ if (e.target === lb) close(); });
 }
 
+function searchBoxHtml(id, value, placeholder){
+  return `
+    <div style="flex:1;min-width:160px;position:relative;">
+      <input id="${id}" type="search" placeholder="${escapeAttr(placeholder)}" value="${escapeAttr(value||'')}"
+        style="width:100%;padding:7px 10px 7px 30px;border:1px solid #ddd;border-radius:8px;font-size:13px;box-sizing:border-box;"/>
+      <span style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:#aaa;font-size:13px;">🔍</span>
+    </div>`;
+}
+
 function renderRatesTab(){
   const canManage = canManageProducts();
-  const visibleRates = state.rates.filter(r => r.visible !== false);
+  let visibleRates = state.rates.filter(r => r.visible !== false);
+  if (state.ratesSearch && state.ratesSearch.trim()){
+    const q = state.ratesSearch.trim().toLowerCase();
+    visibleRates = visibleRates.filter(r => r.name.toLowerCase().includes(q));
+  }
   const cards = visibleRates.map(r => `
     <div class="rate-card">
       <div class="rate-name">${escapeHtml(r.name)}</div>
@@ -1044,16 +1061,22 @@ function renderRatesTab(){
   `).join("");
   return `
     <div class="section-head">
-      <div><h2>Today's Rates</h2><p>Only products marked "Show on Daily Rates" appear here — added from the Products tab.</p></div>
-      ${canManage ? `<button class="btn btn-copper" id="addRateBtnFromDaily">${ICONS.plus} Add product</button>` : ``}
+      <div><h2>Today's Rates</h2><p>Only products marked "Show on Daily Rates" appear here. New products are created in the Products tab — use Add here to publish an existing one.</p></div>
+      ${canManage ? `<button class="btn btn-copper" id="addRateBtnFromDaily">${ICONS.plus} Add from Products</button>` : ``}
     </div>
-    ${visibleRates.length ? `<div class="rate-grid">${cards}</div>` : `<div class="empty">No products marked for Daily Rates yet.</div>`}
+    <div class="toolbar">${searchBoxHtml('ratesSearch', state.ratesSearch, 'Search products…')}</div>
+    ${visibleRates.length ? `<div class="rate-grid">${cards}</div>` : `<div class="empty">${state.ratesSearch ? 'No products found matching "'+escapeHtml(state.ratesSearch)+'".' : 'No products marked for Daily Rates yet.'}</div>`}
   `;
 }
 
 function renderProductsTab(){
   const canManage = canManageProducts();
-  const cards = state.rates.map(r => `
+  let list = state.rates;
+  if (state.productsSearch && state.productsSearch.trim()){
+    const q = state.productsSearch.trim().toLowerCase();
+    list = list.filter(r => r.name.toLowerCase().includes(q));
+  }
+  const cards = list.map(r => `
     <div class="rate-card">
       <div class="rate-name">${escapeHtml(r.name)}</div>
       <div class="rate-unit">per ${escapeHtml(r.unit)}</div>
@@ -1071,7 +1094,8 @@ function renderProductsTab(){
       <div><h2>Products</h2><p>All products in your catalogue — tick "Show on Daily Rates" to publish one to the Daily Rates tab.</p></div>
       ${canManage ? `<button class="btn btn-copper" id="addRateBtn">${ICONS.plus} Add product</button>` : ``}
     </div>
-    ${state.rates.length ? `<div class="rate-grid">${cards}</div>` : `<div class="empty">No products yet. Add your first product to start.</div>`}
+    <div class="toolbar">${searchBoxHtml('productsSearch', state.productsSearch, 'Search products…')}</div>
+    ${list.length ? `<div class="rate-grid">${cards}</div>` : `<div class="empty">${state.productsSearch ? 'No products found matching "'+escapeHtml(state.productsSearch)+'".' : 'No products yet. Add your first product to start.'}</div>`}
     ${!canManage ? `<p style="font-size:11.5px;color:var(--ink-soft);margin-top:14px;">You don't have permission to add or remove products. Ask the admin to enable this on your staff profile.</p>` : ``}
   `;
 }
@@ -1345,6 +1369,8 @@ function syncOpenModalFromDom(){
     if (getVal("mSettleMode") !== undefined) m.data.mode = getVal("mSettleMode");
     if (getVal("mSettleCustomMode") !== undefined) m.data.customMode = getVal("mSettleCustomMode");
     if (getVal("mSettleAmount") !== undefined) m.data.amount = getVal("mSettleAmount");
+  } else if (m.type === 'pickDailyRate'){
+    if (getVal("pickerSearchInput") !== undefined) m.data.search = getVal("pickerSearchInput");
   } else if (m.type === 'staff'){
     if (getVal("mStaffName") !== undefined) m.data.name = getVal("mStaffName");
     if (getVal("mStaffUser") !== undefined) m.data.username = getVal("mStaffUser");
@@ -1478,6 +1504,36 @@ function renderModal(){
         <div class="modal-actions">
           <button class="btn btn-ghost" id="modalCancel">Cancel</button>
           <button class="btn btn-copper" id="modalSave">${d.id ? 'Save changes' : 'Add product'}</button>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  if (m.type === 'pickDailyRate'){
+    const d = m.data || {};
+    const q = (d.search||'').trim().toLowerCase();
+    let hidden = state.rates.filter(r => r.visible === false);
+    if (q) hidden = hidden.filter(r => r.name.toLowerCase().includes(q));
+    const rows = hidden.map(r => `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 4px;border-bottom:1px solid var(--paper-line);">
+        <div>
+          <div style="font-weight:600;font-size:13.5px;">${escapeHtml(r.name)}</div>
+          <div style="font-size:11.5px;color:var(--ink-soft);">${fmtMoney(r.price)} per ${escapeHtml(r.unit)}</div>
+        </div>
+        <button class="btn btn-copper btn-sm" data-add-to-daily="${r.id}">${ICONS.plus} Add</button>
+      </div>
+    `).join("");
+    return `
+    <div class="overlay" id="overlay">
+      <div class="modal">
+        <h3>Add to Daily Rates</h3>
+        <p class="desc">Pick an existing product from your catalogue to publish it here. To create a brand-new product, use the Products tab.</p>
+        <div class="field"><input type="text" id="pickerSearchInput" placeholder="Search your products…" value="${escapeAttr(d.search||'')}"/></div>
+        <div style="max-height:320px;overflow-y:auto;">
+          ${hidden.length ? rows : `<div class="empty" style="padding:20px 6px;">${state.rates.length ? (q ? 'No products found matching "'+escapeHtml(d.search)+'".' : 'Every product in your catalogue is already on Daily Rates.') : 'No products yet — add one in the Products tab first.'}</div>`}
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" id="modalCancel">Done</button>
         </div>
       </div>
     </div>`;
@@ -1736,12 +1792,16 @@ function bindApp(){
 
   if (state.tab === 'rates'){
     const addBtnDaily = document.getElementById("addRateBtnFromDaily");
-    if (addBtnDaily) addBtnDaily.onclick = ()=>{ state.modal = {type:'rate', data:{visible:true}}; render(); };
+    if (addBtnDaily) addBtnDaily.onclick = ()=>{ state.modal = {type:'pickDailyRate', data:{search:''}}; render(); };
+    const rSearch = document.getElementById("ratesSearch");
+    if (rSearch){ rSearch.oninput = (e)=>{ state.ratesSearch = e.target.value; render(); }; }
   }
 
   if (state.tab === 'products'){
     const addBtn = document.getElementById("addRateBtn");
     if (addBtn) addBtn.onclick = ()=>{ state.modal = {type:'rate', data:{}}; render(); };
+    const pSearch = document.getElementById("productsSearch");
+    if (pSearch){ pSearch.oninput = (e)=>{ state.productsSearch = e.target.value; render(); }; }
     document.querySelectorAll("[data-edit-rate]").forEach(b=>{
       b.onclick = ()=>{
         const id = b.dataset.editRate;
@@ -1961,6 +2021,18 @@ function bindModal(){
       state.modal = null;
       render();
     };
+    return;
+  }
+
+  if (m.type === 'pickDailyRate'){
+    const searchInput = document.getElementById("pickerSearchInput");
+    if (searchInput) searchInput.oninput = (e)=>{ m.data.search = e.target.value; render(); };
+    document.querySelectorAll("[data-add-to-daily]").forEach(b=>{
+      b.onclick = async ()=>{
+        const id = b.dataset.addToDaily;
+        await dbUpdate("rates", id, { visible: true });
+      };
+    });
     return;
   }
 
