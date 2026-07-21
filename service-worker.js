@@ -4,7 +4,7 @@
 // so rates/ledger/staff stay real-time. Only the app shell (HTML/CSS/JS/icons) is cached
 // so the app can still open (read-only, last-loaded view) if there's no signal.
 
-const CACHE_NAME = "poonam-electronics-shell-v3.5";
+const CACHE_NAME = "poonam-electronics-shell-v3.7";
 const SHELL_FILES = [
   "./index.html",
   "./manifest.json",
