@@ -50,6 +50,16 @@
   .sync-row{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--ink-soft);}
   .dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 2s infinite;}
   @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.35;}}
+  .status-dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:7px;flex-shrink:0;box-shadow:0 0 0 2px #fff;}
+  .status-dot.online{background:var(--green);}
+  .status-dot.idle{background:#3A6EC9;}
+  .status-dot.offline{background:var(--red);}
+  .status-label{font-size:10.5px;color:var(--ink-soft);margin-left:2px;}
+  .staff-name-cell{display:flex;align-items:center;}
+  .tag.udhaar{background:#FDEFE0;color:#A05A1E;}
+  .perm-box{border:1px solid var(--paper-line);border-radius:9px;padding:10px 12px;margin-top:6px;background:#FBF8F0;}
+  .perm-row{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:4px 0;}
+  .perm-row input{width:auto;}
   nav{display:flex;gap:6px;padding:14px 18px 0;max-width:1040px;margin:0 auto;flex-wrap:wrap;}
   .tab{font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:13px;padding:9px 16px;border-radius:8px 8px 0 0;border:1px solid transparent;cursor:pointer;background:transparent;color:var(--ink-soft);}
   .tab.active{background:var(--card);border:1px solid var(--paper-line);border-bottom-color:var(--card);color:var(--ink);}
@@ -287,14 +297,15 @@ function setPin(username, pin){ localStorage.setItem(pinKeyFor(username), String
 function checkPin(username, pin){ return localStorage.getItem(pinKeyFor(username)) === String(pin); }
 
 const UNIT_OPTIONS = ["pc","bundle","meter","ft","inch","coil","box","roll","set","kg","gram","litre","dozen","pair","sq.ft","packet"];
+const PAYMENT_MODES = ["Cash","UPI","Udhaar","Custom"];
 
 const DEFAULT_RATES = [
-  { id: "r1", name: "Copper Wire 1.5mm (Finolex)", unit: "coil", price: 2450, updated: Date.now() },
-  { id: "r2", name: "Copper Wire 2.5mm (Finolex)", unit: "coil", price: 3850, updated: Date.now() },
-  { id: "r3", name: "PVC Insulated Wire 1.0mm", unit: "coil", price: 1650, updated: Date.now() },
-  { id: "r4", name: "Flexible Wire 4 core", unit: "meter", price: 38, updated: Date.now() },
-  { id: "r5", name: "MCB 32A", unit: "pc", price: 180, updated: Date.now() },
-  { id: "r6", name: "LED Bulb 9W", unit: "pc", price: 65, updated: Date.now() }
+  { id: "r1", name: "Copper Wire 1.5mm (Finolex)", unit: "coil", price: 2450, updated: Date.now(), visible: true },
+  { id: "r2", name: "Copper Wire 2.5mm (Finolex)", unit: "coil", price: 3850, updated: Date.now(), visible: true },
+  { id: "r3", name: "PVC Insulated Wire 1.0mm", unit: "coil", price: 1650, updated: Date.now(), visible: true },
+  { id: "r4", name: "Flexible Wire 4 core", unit: "meter", price: 38, updated: Date.now(), visible: true },
+  { id: "r5", name: "MCB 32A", unit: "pc", price: 180, updated: Date.now(), visible: true },
+  { id: "r6", name: "LED Bulb 9W", unit: "pc", price: 65, updated: Date.now(), visible: true }
 ];
 
 // ---------- Firebase ----------
@@ -329,9 +340,9 @@ function dbCreate(node, data){
   data.id = id;
   return db.ref(node + "/" + id).set(data).then(()=>id);
 }
-function dbUpdate(node, id, patch){ return db.ref(node + "/" + id).update(patch); }
-function dbSet(node, id, data){ return db.ref(node + "/" + id).set(data); }
-function dbRemove(node, id){ return db.ref(node + "/" + id).remove(); }
+function dbUpdate(node, id, patch){ return db.ref(node + "/" + id).update(patch).catch(e=>{ console.error(e); alert("Could not save the change — check your connection and try again."); throw e; }); }
+function dbSet(node, id, data){ return db.ref(node + "/" + id).set(data).catch(e=>{ console.error(e); alert("Could not save — check your connection and try again."); throw e; }); }
+function dbRemove(node, id){ return db.ref(node + "/" + id).remove().catch(e=>{ console.error(e); alert("Could not delete — check your connection and try again."); throw e; }); }
 
 function attachListener(node, key){
   db.ref(node).on("value", (snap)=>{
@@ -376,6 +387,30 @@ function forceLogoutStaffRemoved(){
   state.loginErr = "Your account was removed by the admin. Please contact the admin if this is unexpected.";
   state.screen = 'login';
   render();
+}
+
+// ---------- staff presence (green = active, blue = not active, red = logged out) ----------
+function presenceRef(username){ return db.ref("staff/" + username + "/presence"); }
+function setupPresence(username){
+  if (!db || !username) return;
+  const ref = presenceRef(username);
+  ref.onDisconnect().set({ state: "idle", lastSeen: firebase.database.ServerValue.TIMESTAMP });
+  ref.set({ state: "online", lastSeen: firebase.database.ServerValue.TIMESTAMP });
+  document.addEventListener("visibilitychange", ()=>{
+    if (!db || state.role !== 'staff' || state.currentUser !== username) return;
+    ref.set({ state: document.hidden ? "idle" : "online", lastSeen: firebase.database.ServerValue.TIMESTAMP });
+  });
+}
+function markStaffLoggedOut(username){
+  if (!db || !username) return;
+  presenceRef(username).onDisconnect().cancel();
+  presenceRef(username).set({ state: "loggedOut", lastSeen: firebase.database.ServerValue.TIMESTAMP });
+}
+function staffStatusInfo(s){
+  const p = s && s.presence;
+  if (!p || p.state === 'loggedOut') return { cls: 'offline', label: 'Logged out' };
+  if (p.state === 'online') return { cls: 'online', label: 'Active' };
+  return { cls: 'idle', label: 'Not active' };
 }
 
 async function seedIfEmpty(){
@@ -445,6 +480,7 @@ let state = {
   longLedgerFilter: "all",
   ledgerSearch: "",
   longLedgerSearch: "",
+  udhaarSearch: "",
   lastSync: null,
   cleanupConfirmText: "",
   busy: false,
@@ -460,7 +496,32 @@ function todayStr(){ return new Date().toISOString().slice(0,10); }
 function fmtTime(ts){ if(!ts) return "—"; const d = new Date(ts); return d.toLocaleDateString("en-IN",{day:"2-digit",month:"short"}) + " · " + d.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}); }
 function escapeHtml(s){ return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
 function escapeAttr(s){ return escapeHtml(s); }
-function canModifyEntry(e){ if (state.role === "admin") return true; return state.role === "staff" && e.createdBy === state.currentUser; }
+function currentStaffRecord(){
+  if (state.role !== 'staff' || !state.currentUser) return null;
+  return state.staffList.find(s => s.username === state.currentUser) || null;
+}
+function staffHasPermission(staffRec, perm){
+  if (!staffRec) return false;
+  if (!staffRec.permissions) return perm === 'editProducts'; // legacy accounts: could manage products, couldn't delete others' entries
+  if (perm === 'editProducts') return staffRec.permissions.editProducts !== false;
+  return !!staffRec.permissions[perm];
+}
+function canModifyEntry(e){
+  if (state.role === "admin") return true;
+  if (state.role !== "staff") return false;
+  if (e.createdBy === state.currentUser) return true;
+  return staffHasPermission(currentStaffRecord(), 'deleteAny');
+}
+function canManageProducts(){
+  if (state.role === 'admin') return true;
+  return staffHasPermission(currentStaffRecord(), 'editProducts');
+}
+function paymentModeLabel(e){
+  if (!e || !e.paymentMode) return "—";
+  if (e.paymentMode === 'Custom') return escapeHtml(e.customPaymentMode || 'Custom');
+  return escapeHtml(e.paymentMode);
+}
+function isUdhaar(e){ return e && e.paymentMode === 'Udhaar'; }
 
 // ---------- icons ----------
 const ICONS = {
@@ -507,8 +568,10 @@ function downloadEntryInvoice(e){
   const lines = [
     ["Type", e.type.toUpperCase()],
     ["Date", e.date],
+    ["Time", fmtTime(e.timestamp)],
     ["Party / Customer", e.party || "—"],
     ["Amount", fmtMoney(e.amount)],
+    ["Payment mode", e.paymentMode ? (e.paymentMode === 'Custom' ? (e.customPaymentMode || 'Custom') : e.paymentMode) : "—"],
     ["Note", e.note || "—"],
     ["Added by", e.createdBy || "Admin"]
   ];
@@ -532,12 +595,17 @@ function downloadBillInvoice(b){
   doc.setFont("helvetica","bold"); doc.text("Bill No:", 110, y);
   doc.setFont("helvetica","normal"); doc.text(String(b.id).slice(-6).toUpperCase(), 135, y);
   y += 9;
+  doc.setFont("helvetica","bold"); doc.text("Time:", 14, y);
+  doc.setFont("helvetica","normal"); doc.text(fmtTime(b.timestamp), 35, y);
+  y += 9;
   doc.setFont("helvetica","bold"); doc.text("Customer:", 14, y);
   doc.setFont("helvetica","normal"); doc.text(b.customerName || "—", 40, y);
   y += 7;
   if (b.customerPhone){ doc.setFont("helvetica","bold"); doc.text("Phone:", 14, y); doc.setFont("helvetica","normal"); doc.text(b.customerPhone, 40, y); y += 7; }
   if (b.customerAddress){ doc.setFont("helvetica","bold"); doc.text("Address:", 14, y); doc.setFont("helvetica","normal"); doc.text(doc.splitTextToSize(b.customerAddress, 140), 40, y); y += 10; }
-  y += 4;
+  doc.setFont("helvetica","bold"); doc.text("Payment mode:", 14, y);
+  doc.setFont("helvetica","normal"); doc.text(b.paymentMode ? (b.paymentMode === 'Custom' ? (b.customPaymentMode || 'Custom') : b.paymentMode) : "—", 55, y);
+  y += 9;
   doc.setFont("helvetica","bold");
   doc.text("Product", 14, y); doc.text("Qty", 95, y); doc.text("Unit", 115, y); doc.text("Rate", 140, y); doc.text("Amount", 170, y);
   y += 3;
@@ -651,7 +719,7 @@ function render(){
   bindApp();
   if (state.lightboxImg) bindLightbox();
   // Restore focus + cursor position to search input after rebuild
-  if (focusedId === 'ledgerSearch' || focusedId === 'longLedgerSearch'){
+  if (focusedId === 'ledgerSearch' || focusedId === 'longLedgerSearch' || focusedId === 'udhaarSearch'){
     const el = document.getElementById(focusedId);
     if (el){ el.focus(); const len = el.value.length; el.setSelectionRange(len, len); }
   }
@@ -807,6 +875,7 @@ async function completeLoginSuccess(role, username){
   state.role = role;
   state.currentUser = username; // null for admin
   state.loginErr=''; state.loginUser=''; state.loginPass='';
+  if (role === 'staff' && username && firebaseReady) setupPresence(username);
 
   // For admin, use a fixed key so the same device-lock/PIN setup is reused.
   const authKey = username || ADMIN_USER;
@@ -881,6 +950,7 @@ function renderApp(){
       <button class="tab ${state.tab==='products'?'active':''}" data-tab="products">Products</button>
       <button class="tab ${state.tab==='ledger'?'active':''}" data-tab="ledger">Ledger</button>
       <button class="tab ${state.tab==='longledger'?'active':''}" data-tab="longledger">Long Ledger</button>
+      <button class="tab ${state.tab==='udhaar'?'active':''}" data-tab="udhaar">Udhaar</button>
       <button class="tab ${state.tab==='dashboard'?'active':''}" data-tab="dashboard">Dashboard</button>
       ${state.role==='admin' ? `<button class="tab ${state.tab==='admin'?'active':''}" data-tab="admin">Admin</button>` : ``}
     </nav>
@@ -890,6 +960,7 @@ function renderApp(){
           : state.tab==='products' ? renderProductsTab()
           : state.tab==='ledger' ? renderLedgerTab()
           : state.tab==='longledger' ? renderLongLedgerTab()
+          : state.tab==='udhaar' ? renderUdhaarTab()
           : state.tab==='dashboard' ? renderDashboardTab()
           : renderAdminTab()}
       </div>
@@ -910,7 +981,8 @@ function bindLightbox(){
 }
 
 function renderRatesTab(){
-  const cards = state.rates.map(r => `
+  const visibleRates = state.rates.filter(r => r.visible !== false);
+  const cards = visibleRates.map(r => `
     <div class="rate-card">
       <div class="rate-name">${escapeHtml(r.name)}</div>
       <div class="rate-unit">per ${escapeHtml(r.unit)}</div>
@@ -919,30 +991,33 @@ function renderRatesTab(){
     </div>
   `).join("");
   return `
-    <div class="section-head"><div><h2>Today's Rates</h2><p>A clean view of current prices. Go to the Products tab to add or edit.</p></div></div>
-    ${state.rates.length ? `<div class="rate-grid">${cards}</div>` : `<div class="empty">No products yet. Check back soon.</div>`}
+    <div class="section-head"><div><h2>Today's Rates</h2><p>Only products marked "Show on Daily Rates" appear here. Go to the Products tab to add or edit.</p></div></div>
+    ${visibleRates.length ? `<div class="rate-grid">${cards}</div>` : `<div class="empty">No products marked for Daily Rates yet.</div>`}
   `;
 }
 
 function renderProductsTab(){
+  const canManage = canManageProducts();
   const cards = state.rates.map(r => `
     <div class="rate-card">
       <div class="rate-name">${escapeHtml(r.name)}</div>
       <div class="rate-unit">per ${escapeHtml(r.unit)}</div>
       <div class="rate-price">${fmtMoney(r.price)}</div>
-      <div class="rate-updated">Updated ${fmtTime(r.updated)}</div>
+      <div class="rate-updated">Updated ${fmtTime(r.updated)} ${r.visible === false ? '· <span style="color:var(--ink-soft);">hidden from Daily Rates</span>' : ''}</div>
+      ${canManage ? `
       <div class="rate-actions">
         <button class="btn btn-ghost btn-sm" data-edit-rate="${r.id}">${ICONS.edit} Edit</button>
         <button class="btn btn-danger btn-sm" data-del-rate="${r.id}">${ICONS.trash}</button>
-      </div>
+      </div>` : ``}
     </div>
   `).join("");
   return `
     <div class="section-head">
-      <div><h2>Products</h2><p>Add, edit or remove products and rates — everyone sees changes instantly.</p></div>
-      <button class="btn btn-copper" id="addRateBtn">${ICONS.plus} Add product</button>
+      <div><h2>Products</h2><p>All products in your catalogue — tick "Show on Daily Rates" to publish one to the Daily Rates tab.</p></div>
+      ${canManage ? `<button class="btn btn-copper" id="addRateBtn">${ICONS.plus} Add product</button>` : ``}
     </div>
     ${state.rates.length ? `<div class="rate-grid">${cards}</div>` : `<div class="empty">No products yet. Add your first product to start.</div>`}
+    ${!canManage ? `<p style="font-size:11.5px;color:var(--ink-soft);margin-top:14px;">You don't have permission to add or remove products. Ask the admin to enable this on your staff profile.</p>` : ``}
   `;
 }
 
@@ -972,6 +1047,7 @@ function renderLedgerTab(){
       <td class="mono" style="white-space:nowrap;">${e.date}</td>
       <td><span class="tag ${e.type}">${e.type}</span></td>
       <td>${escapeHtml(e.party||'—')}${e.image ? ' <span title="Has photo">📷</span>' : ''}</td>
+      <td>${isUdhaar(e) ? `<span class="tag udhaar">Udhaar</span>` : paymentModeLabel(e)}</td>
       <td style="text-align:right;"><span class="amt ${e.type==='sale'?'pos':'neg'}">${e.type==='sale'?'+':'−'}${fmtMoney(e.amount)}</span></td>
     </tr>
   `).join("");
@@ -991,7 +1067,7 @@ function renderLedgerTab(){
         <span style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:#aaa;font-size:13px;">🔍</span>
       </div>
     </div>
-    ${entries.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Date</th><th>Type</th><th>Party</th><th style="text-align:right;">Amount</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">No entries found${state.ledgerSearch ? ' matching "'+escapeHtml(state.ledgerSearch)+'"' : (state.ledgerFilter==='today'?' for today':'')}.</div>`}
+    ${entries.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Date</th><th>Type</th><th>Party</th><th>Payment</th><th style="text-align:right;">Amount</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">No entries found${state.ledgerSearch ? ' matching "'+escapeHtml(state.ledgerSearch)+'"' : (state.ledgerFilter==='today'?' for today':'')}.</div>`}
   `;
 }
 
@@ -1016,6 +1092,7 @@ function renderLongLedgerTab(){
       <td class="mono" style="white-space:nowrap;">${b.date}</td>
       <td>${escapeHtml(b.customerName||'—')}${b.image ? ' <span title="Has photo">📷</span>' : ''}</td>
       <td>${(b.items||[]).length} item${(b.items||[]).length===1?'':'s'}</td>
+      <td>${isUdhaar(b) ? `<span class="tag udhaar">Udhaar</span>` : paymentModeLabel(b)}</td>
       <td style="text-align:right;"><span class="amt mono">${fmtMoney(b.totalAmount)}</span></td>
     </tr>
   `).join("");
@@ -1035,7 +1112,52 @@ function renderLongLedgerTab(){
         <span style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:#aaa;font-size:13px;">🔍</span>
       </div>
     </div>
-    ${bills.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Date</th><th>Customer</th><th>Items</th><th style="text-align:right;">Total</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">No bills found${state.longLedgerSearch ? ' matching "'+escapeHtml(state.longLedgerSearch)+'"' : ''}.</div>`}
+    ${bills.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Date</th><th>Customer</th><th>Items</th><th>Payment</th><th style="text-align:right;">Total</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">No bills found${state.longLedgerSearch ? ' matching "'+escapeHtml(state.longLedgerSearch)+'"' : ''}.</div>`}
+  `;
+}
+
+function udhaarEntries(){
+  let ledgerDue = state.ledger.filter(isUdhaar).map(e => ({ kind:'ledger', id:e.id, date:e.date, timestamp:e.timestamp, name:e.party||'—', amount:e.amount, ref:e }));
+  let billDue = state.longLedger.filter(isUdhaar).map(b => ({ kind:'bill', id:b.id, date:b.date, timestamp:b.timestamp, name:b.customerName||'—', amount:b.totalAmount, ref:b }));
+  let all = ledgerDue.concat(billDue);
+  if (state.udhaarSearch && state.udhaarSearch.trim()){
+    const q = state.udhaarSearch.trim().toLowerCase();
+    all = all.filter(r => r.name.toLowerCase().includes(q));
+  }
+  return all.sort((a,b)=>{
+    if (b.date !== a.date) return b.date > a.date ? 1 : -1;
+    return (b.timestamp||0) - (a.timestamp||0);
+  });
+}
+
+function renderUdhaarTab(){
+  const rows = udhaarEntries();
+  const total = rows.reduce((s,r)=> s + Number(r.amount||0), 0);
+  const trs = rows.map(r => `
+    <tr data-udhaar-kind="${r.kind}" data-udhaar-id="${r.id}" style="cursor:pointer;">
+      <td class="mono" style="white-space:nowrap;">${r.date}</td>
+      <td>${escapeHtml(r.name)}</td>
+      <td><span class="tag ${r.kind==='ledger'?'sale':'purchase'}">${r.kind==='ledger'?'Entry':'Bill'}</span></td>
+      <td class="mono" style="font-size:11px;color:var(--ink-soft);">${fmtTime(r.timestamp)}</td>
+      <td style="text-align:right;"><span class="amt neg mono">${fmtMoney(r.amount)}</span></td>
+    </tr>
+  `).join("");
+  return `
+    <div class="section-head">
+      <div><h2>Udhaar</h2><p>Every ledger entry and bill marked with payment mode "Udhaar" — the running credit / due register.</p></div>
+    </div>
+    <div class="stat-grid" style="margin-bottom:14px;">
+      <div class="stat expense"><div class="label">Total Udhaar Due</div><div class="value">${fmtMoney(total)}</div></div>
+      <div class="stat"><div class="label">Records</div><div class="value">${rows.length}</div></div>
+    </div>
+    <div class="toolbar">
+      <div style="flex:1;min-width:160px;position:relative;">
+        <input id="udhaarSearch" type="search" placeholder="Search by name…" value="${escapeAttr(state.udhaarSearch||'')}"
+          style="width:100%;padding:7px 10px 7px 30px;border:1px solid #ddd;border-radius:8px;font-size:13px;box-sizing:border-box;"/>
+        <span style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:#aaa;font-size:13px;">🔍</span>
+      </div>
+    </div>
+    ${rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Date</th><th>Name</th><th>Type</th><th>Time</th><th style="text-align:right;">Amount</th></tr></thead><tbody>${trs}</tbody></table></div>` : `<div class="empty">No Udhaar (credit) records yet. Mark an invoice's payment mode as "Udhaar" to see it here.</div>`}
   `;
 }
 
@@ -1072,9 +1194,11 @@ function renderAdminTab(){
 }
 
 function renderStaffAdmin(){
-  const rows = state.staffList.map(s => `
+  const rows = state.staffList.map(s => {
+    const status = staffStatusInfo(s);
+    return `
     <tr>
-      <td>${escapeHtml(s.name || s.username)}</td>
+      <td><div class="staff-name-cell"><span class="status-dot ${status.cls}" title="${status.label}"></span>${escapeHtml(s.name || s.username)}<span class="status-label">${status.label}</span></div></td>
       <td class="mono">${escapeHtml(s.username)}</td>
       <td class="mono">${escapeHtml(s.password)}</td>
       <td style="white-space:nowrap;">
@@ -1082,10 +1206,10 @@ function renderStaffAdmin(){
         <button class="btn btn-danger btn-sm" data-del-staff="${escapeAttr(s.username)}">${ICONS.trash}</button>
       </td>
     </tr>
-  `).join("");
+  `;}).join("");
   return `
     <div class="section-head">
-      <div><p style="margin:0;">Create a username and password for each worker — they log in with these on the Staff tab.</p></div>
+      <div><p style="margin:0;">Create a username and password for each worker — they log in with these on the Staff tab. Edit a staff member to set their permissions.</p></div>
       <button class="btn btn-copper" id="addStaffBtn">${ICONS.plus} Create staff</button>
     </div>
     ${state.staffList.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Name</th><th>Username</th><th>Password</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">No staff accounts yet. Create one so your workers can log in.</div>`}
@@ -1139,14 +1263,20 @@ function syncOpenModalFromDom(){
     if (getVal("mName") !== undefined) m.data.name = getVal("mName");
     if (getVal("mUnit") !== undefined) m.data.unit = getVal("mUnit");
     if (getVal("mPrice") !== undefined) m.data.price = getVal("mPrice");
+    const visEl = document.getElementById("mVisible");
+    if (visEl) m.data.visible = visEl.checked;
   } else if (m.type === 'ledger'){
     if (getVal("mType") !== undefined) m.data.type = getVal("mType");
     if (getVal("mDate") !== undefined) m.data.date = getVal("mDate");
     if (getVal("mParty") !== undefined) m.data.party = getVal("mParty");
     if (getVal("mAmount") !== undefined) m.data.amount = getVal("mAmount");
     if (getVal("mNote") !== undefined) m.data.note = getVal("mNote");
+    if (getVal("mPaymentMode") !== undefined) m.data.paymentMode = getVal("mPaymentMode");
+    if (getVal("mCustomPaymentMode") !== undefined) m.data.customPaymentMode = getVal("mCustomPaymentMode");
   } else if (m.type === 'longledger'){
     syncLongLedgerItemsFromDom();
+    if (getVal("mPaymentMode") !== undefined) m.data.paymentMode = getVal("mPaymentMode");
+    if (getVal("mCustomPaymentMode") !== undefined) m.data.customPaymentMode = getVal("mCustomPaymentMode");
   } else if (m.type === 'staff'){
     if (getVal("mStaffName") !== undefined) m.data.name = getVal("mStaffName");
     if (getVal("mStaffUser") !== undefined) m.data.username = getVal("mStaffUser");
@@ -1180,11 +1310,15 @@ function syncLongLedgerItemsFromDom(){
   const custPhoneEl = document.getElementById("mCustPhone");
   const custAddrEl = document.getElementById("mCustAddress");
   const noteEl = document.getElementById("mNote");
+  const paymentModeEl = document.getElementById("mPaymentMode");
+  const customPaymentModeEl = document.getElementById("mCustomPaymentMode");
   if (dateEl) state.modal.data.date = dateEl.value;
   if (custNameEl) state.modal.data.customerName = custNameEl.value;
   if (custPhoneEl) state.modal.data.customerPhone = custPhoneEl.value;
   if (custAddrEl) state.modal.data.customerAddress = custAddrEl.value;
   if (noteEl) state.modal.data.note = noteEl.value;
+  if (paymentModeEl) state.modal.data.paymentMode = paymentModeEl.value;
+  if (customPaymentModeEl) state.modal.data.customPaymentMode = customPaymentModeEl.value;
 }
 function addLongLedgerLine(){
   syncLongLedgerItemsFromDom();
@@ -1234,14 +1368,19 @@ function renderModal(){
 
   if (m.type === 'rate'){
     const d = m.data || {name:"",unit:"",price:""};
+    const isVisible = d.visible !== false;
     return `
     <div class="overlay" id="overlay">
       <div class="modal">
         <h3>${d.id ? 'Edit product' : 'Add product'}</h3>
-        <p class="desc">${d.id ? 'Update the price — everyone will see it instantly.' : 'Add a new item to the daily rate card.'}</p>
+        <p class="desc">${d.id ? 'Update the price — everyone will see it instantly.' : 'Add a new item to your catalogue.'}</p>
         <div class="field"><label>Product name</label><input type="text" id="mName" value="${escapeAttr(d.name)}" placeholder="e.g. Copper Wire 1.5mm"/></div>
         <div class="field"><label>Unit</label><input type="text" id="mUnit" list="unitOptionsList" value="${escapeAttr(d.unit)}" placeholder="e.g. coil, meter, pc"/></div>
         <div class="field"><label>Price (₹)</label><input type="number" id="mPrice" value="${d.price ?? ''}" placeholder="0"/></div>
+        <div class="field" style="display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" id="mVisible" style="width:auto;" ${isVisible ? 'checked' : ''}/>
+          <label style="margin:0;" for="mVisible">Show on Daily Rates tab</label>
+        </div>
         <datalist id="unitOptionsList">${UNIT_OPTIONS.map(u=>`<option value="${u}"></option>`).join('')}</datalist>
         <div class="err" id="modalErr"></div>
         <div class="modal-actions">
@@ -1269,6 +1408,13 @@ function renderModal(){
         <div class="field"><label>Date</label><input type="date" id="mDate" value="${d.date || todayStr()}"/></div>
         <div class="field"><label>Party / customer name</label><input type="text" id="mParty" value="${escapeAttr(d.party||'')}" placeholder="e.g. Ramesh Hardware"/></div>
         <div class="field"><label>Amount (₹)</label><input type="number" id="mAmount" value="${d.amount ?? ''}" placeholder="0"/></div>
+        <div class="field"><label>Payment mode</label>
+          <select id="mPaymentMode">
+            <option value="">Select payment mode</option>
+            ${PAYMENT_MODES.map(p=>`<option value="${p}" ${d.paymentMode===p?'selected':''}>${p}</option>`).join('')}
+          </select>
+        </div>
+        ${d.paymentMode === 'Custom' ? `<div class="field"><label>Custom payment mode</label><input type="text" id="mCustomPaymentMode" value="${escapeAttr(d.customPaymentMode||'')}" placeholder="e.g. Cheque, Bank transfer"/></div>` : ``}
         <div class="field"><label>Note (optional)</label><input type="text" id="mNote" value="${escapeAttr(d.note||'')}" placeholder="e.g. 2 coils copper wire"/></div>
         <div class="field">
           <label>Photo (optional)</label>
@@ -1277,6 +1423,7 @@ function renderModal(){
             ${d.image ? `<div class="img-row"><img src="${d.image}" class="img-thumb" style="max-height:110px;"/><button class="btn btn-ghost btn-sm" type="button" id="mImageRemove">Remove photo</button></div>` : `<div style="font-size:11.5px;color:var(--ink-soft);margin-top:6px;">Photos are compressed automatically to save space.</div>`}
           </div>
         </div>
+        ${d.id ? `<div style="font-size:11px;color:var(--ink-soft);margin-top:-6px;margin-bottom:10px;">Created ${fmtTime(d.timestamp)}</div>` : ``}
         <div class="err" id="modalErr"></div>
         <div class="modal-actions">
           <button class="btn btn-ghost" id="modalCancel">Cancel</button>
@@ -1320,7 +1467,15 @@ function renderModal(){
         </div>
         <button class="btn btn-ghost btn-sm" type="button" onclick="addLongLedgerLine()">${ICONS.plus} Add line</button>
         <div class="grand-total-row" style="margin-top:10px;"><span>Grand Total</span><span class="val" id="grandTotalVal">${fmtMoney(total)}</span></div>
+        <div class="field" style="margin-top:12px;"><label>Payment mode</label>
+          <select id="mPaymentMode">
+            <option value="">Select payment mode</option>
+            ${PAYMENT_MODES.map(p=>`<option value="${p}" ${d.paymentMode===p?'selected':''}>${p}</option>`).join('')}
+          </select>
+        </div>
+        ${d.paymentMode === 'Custom' ? `<div class="field"><label>Custom payment mode</label><input type="text" id="mCustomPaymentMode" value="${escapeAttr(d.customPaymentMode||'')}" placeholder="e.g. Cheque, Bank transfer"/></div>` : ``}
         <div class="field" style="margin-top:12px;"><label>Note (optional)</label><input type="text" id="mNote" value="${escapeAttr(d.note||'')}" placeholder="e.g. Delivery pending"/></div>
+        ${d.id ? `<div style="font-size:11px;color:var(--ink-soft);margin:-6px 0 10px;">Created ${fmtTime(d.timestamp)}</div>` : ``}
         <div class="field">
           <label>Photo of invoice (optional)</label>
           <div class="img-drop">
@@ -1346,13 +1501,15 @@ function renderModal(){
     <div class="overlay" id="overlay">
       <div class="modal">
         <h3>Entry details</h3>
-        <p class="desc"><span class="tag ${e.type}">${e.type}</span></p>
+        <p class="desc"><span class="tag ${e.type}">${e.type}</span>${isUdhaar(e) ? ` <span class="tag udhaar">Udhaar</span>` : ``}</p>
         <div style="display:flex;flex-direction:column;gap:10px;font-size:13.5px;margin-bottom:6px;">
           <div><strong>Amount:</strong> <span class="amt ${e.type==='sale'?'pos':'neg'} mono">${e.type==='sale'?'+':'−'}${fmtMoney(e.amount)}</span></div>
           <div><strong>Date:</strong> ${e.date}</div>
           <div><strong>Party / customer:</strong> ${escapeHtml(e.party || '—')}</div>
+          <div><strong>Payment mode:</strong> ${paymentModeLabel(e)}</div>
           <div><strong>Note:</strong> ${escapeHtml(e.note || '—')}</div>
           <div><strong>Added by:</strong> ${escapeHtml(e.createdBy || 'Admin')}</div>
+          <div><strong>Created:</strong> ${fmtTime(e.timestamp)}</div>
           ${e.image ? `<div><strong>Photo:</strong><br/><img src="${e.image}" class="img-thumb" id="detailImgThumb"/></div>` : ``}
         </div>
         <div class="modal-actions">
@@ -1375,12 +1532,14 @@ function renderModal(){
     <div class="overlay" id="overlay">
       <div class="modal wide">
         <h3>Bill details</h3>
-        <p class="desc">${b.date} · Bill #${String(b.id).slice(-6).toUpperCase()}</p>
+        <p class="desc">${b.date} · Bill #${String(b.id).slice(-6).toUpperCase()}${isUdhaar(b) ? ` · <span class="tag udhaar">Udhaar</span>` : ``}</p>
         <div style="font-size:13.5px;margin-bottom:12px;line-height:1.6;">
           <div><strong>Customer:</strong> ${escapeHtml(b.customerName||'—')}</div>
           ${b.customerPhone ? `<div><strong>Phone:</strong> ${escapeHtml(b.customerPhone)}</div>` : ``}
           ${b.customerAddress ? `<div><strong>Address:</strong> ${escapeHtml(b.customerAddress)}</div>` : ``}
+          <div><strong>Payment mode:</strong> ${paymentModeLabel(b)}</div>
           <div><strong>Added by:</strong> ${escapeHtml(b.createdBy||'Admin')}</div>
+          <div><strong>Created:</strong> ${fmtTime(b.timestamp)}</div>
         </div>
         <div style="overflow-x:auto;"><table><thead><tr><th>Product</th><th>Qty</th><th>Unit</th><th>Rate</th><th style="text-align:right;">Amount</th></tr></thead><tbody>${rows}</tbody></table></div>
         <div class="grand-total-row" style="margin-top:10px;"><span>Grand Total</span><span class="val">${fmtMoney(b.totalAmount)}</span></div>
@@ -1398,14 +1557,24 @@ function renderModal(){
 
   if (m.type === 'staff'){
     const d = m.data || {};
+    const perms = d.permissions || {};
+    const canEditProducts = perms.editProducts !== false;
+    const canDeleteAny = !!perms.deleteAny;
     return `
     <div class="overlay" id="overlay">
       <div class="modal">
         <h3>${d.editing ? 'Edit staff account' : 'Create staff account'}</h3>
-        <p class="desc">${d.editing ? "Update this worker's login details." : 'Choose the username and password yourself — share them with the worker.'}</p>
+        <p class="desc">${d.editing ? "Update this worker's login details and permissions." : 'Choose the username and password yourself — share them with the worker.'}</p>
         <div class="field"><label>Full name (optional)</label><input type="text" id="mStaffName" value="${escapeAttr(d.name||'')}" placeholder="e.g. Ramesh Kumar"/></div>
         <div class="field"><label>Username</label><input type="text" id="mStaffUser" value="${escapeAttr(d.username||'')}" placeholder="e.g. ramesh"/></div>
         <div class="field"><label>Password</label><input type="text" id="mStaffPass" value="${escapeAttr(d.password||'')}" placeholder="Choose a password"/></div>
+        <div class="field">
+          <label>Permissions</label>
+          <div class="perm-box">
+            <div class="perm-row"><input type="checkbox" id="mPermEditProducts" ${canEditProducts?'checked':''}/><label for="mPermEditProducts" style="margin:0;font-weight:500;">Can add / edit / delete products</label></div>
+            <div class="perm-row"><input type="checkbox" id="mPermDeleteAny" ${canDeleteAny?'checked':''}/><label for="mPermDeleteAny" style="margin:0;font-weight:500;">Can delete any invoice (not just their own)</label></div>
+          </div>
+        </div>
         <div class="err" id="modalErr"></div>
         <div class="modal-actions">
           <button class="btn btn-ghost" id="modalCancel">Cancel</button>
@@ -1421,6 +1590,7 @@ function renderModal(){
 // ---------- event binding ----------
 function bindApp(){
   document.getElementById("logoutBtn").onclick = ()=>{
+    if (state.role === 'staff' && state.currentUser) markStaffLoggedOut(state.currentUser);
     state.role=null; state.currentUser=null;
     state.loginPass=''; state.loginUser=''; state.loginErr='';
     // Logging out doesn't clear today's verified session — re-entering today
@@ -1483,6 +1653,24 @@ function bindApp(){
         const id = tr.dataset.billId;
         const bill = state.longLedger.find(b=>b.id===id);
         if (bill) { state.modal = {type:'billDetail', data: bill}; render(); }
+      };
+    });
+  }
+
+  if (state.tab === 'udhaar'){
+    const uSearch = document.getElementById("udhaarSearch");
+    if (uSearch){ uSearch.oninput = (e)=>{ state.udhaarSearch = e.target.value; render(); }; }
+    document.querySelectorAll("[data-udhaar-id]").forEach(tr=>{
+      tr.onclick = ()=>{
+        const id = tr.dataset.udhaarId;
+        const kind = tr.dataset.udhaarKind;
+        if (kind === 'ledger'){
+          const entry = state.ledger.find(e=>e.id===id);
+          if (entry) { state.modal = {type:'entryDetail', data: entry}; render(); }
+        } else {
+          const bill = state.longLedger.find(b=>b.id===id);
+          if (bill) { state.modal = {type:'billDetail', data: bill}; render(); }
+        }
       };
     });
   }
@@ -1569,6 +1757,14 @@ function bindModal(){
     render();
   };
 
+  if (m.type === 'ledger' || m.type === 'longledger'){
+    const pmSel = document.getElementById("mPaymentMode");
+    if (pmSel) pmSel.onchange = ()=>{
+      syncOpenModalFromDom();
+      render();
+    };
+  }
+
   if (m.type === 'entryDetail' || m.type === 'billDetail'){
     const thumb = document.getElementById("detailImgThumb");
     if (thumb) thumb.onclick = ()=>{ state.lightboxImg = m.data.image; render(); };
@@ -1599,9 +1795,10 @@ function bindModal(){
       const name = document.getElementById("mName").value.trim();
       const unit = document.getElementById("mUnit").value.trim();
       const price = parseFloat(document.getElementById("mPrice").value);
+      const visible = !!document.getElementById("mVisible").checked;
       if (!name || !unit || isNaN(price) || price < 0){ errEl.textContent = "Please fill in name, unit and a valid price."; return; }
       const id = m.data.id || newId("rate");
-      await dbSet("rates", id, { id, name, unit, price, updated: Date.now() });
+      await dbSet("rates", id, { id, name, unit, price, visible, updated: Date.now() });
       state.modal = null; render();
 
     } else if (m.type === 'ledger'){
@@ -1610,10 +1807,14 @@ function bindModal(){
       const party = document.getElementById("mParty").value.trim();
       const amount = parseFloat(document.getElementById("mAmount").value);
       const note = document.getElementById("mNote").value.trim();
+      const paymentMode = document.getElementById("mPaymentMode").value;
+      const customPaymentMode = paymentMode === 'Custom' ? (document.getElementById("mCustomPaymentMode")?.value.trim() || '') : '';
       if (isNaN(amount) || amount <= 0){ errEl.textContent = "Please enter a valid amount."; return; }
+      if (paymentMode === 'Custom' && !customPaymentMode){ errEl.textContent = "Please name the custom payment mode."; return; }
       const id = m.data.id || newId("entry");
       const createdBy = m.data.createdBy || (state.role === 'admin' ? 'Admin' : state.currentUser);
-      await dbSet("ledger", id, { id, type, date, party, amount, note, createdBy, image: m.data.image || null });
+      const timestamp = m.data.timestamp || Date.now();
+      await dbSet("ledger", id, { id, type, date, party, amount, note, createdBy, paymentMode: paymentMode || null, customPaymentMode: customPaymentMode || null, timestamp, image: m.data.image || null });
       state.modal = null; render();
 
     } else if (m.type === 'longledger'){
@@ -1623,13 +1824,17 @@ function bindModal(){
       const customerPhone = document.getElementById("mCustPhone").value.trim();
       const customerAddress = document.getElementById("mCustAddress").value.trim();
       const note = document.getElementById("mNote").value.trim();
+      const paymentMode = document.getElementById("mPaymentMode").value;
+      const customPaymentMode = paymentMode === 'Custom' ? (document.getElementById("mCustomPaymentMode")?.value.trim() || '') : '';
       const items = (m.data.items || []).filter(it => it.product && it.qty > 0);
       if (!customerName){ errEl.textContent = "Please enter the customer's name."; return; }
       if (!items.length){ errEl.textContent = "Add at least one product with a quantity."; return; }
+      if (paymentMode === 'Custom' && !customPaymentMode){ errEl.textContent = "Please name the custom payment mode."; return; }
       const totalAmount = items.reduce((s,it)=> s + it.amount, 0);
       const id = m.data.id || newId("bill");
       const createdBy = m.data.createdBy || (state.role === 'admin' ? 'Admin' : state.currentUser);
-      await dbSet("longLedger", id, { id, date, customerName, customerPhone, customerAddress, items, totalAmount, note, createdBy, image: m.data.image || null });
+      const timestamp = m.data.timestamp || Date.now();
+      await dbSet("longLedger", id, { id, date, customerName, customerPhone, customerAddress, items, totalAmount, note, createdBy, paymentMode: paymentMode || null, customPaymentMode: customPaymentMode || null, timestamp, image: m.data.image || null });
       state.modal = null; render();
 
     } else if (m.type === 'staff'){
@@ -1643,8 +1848,12 @@ function bindModal(){
       const originalUsername = m.data.username;
       const clashes = state.staffList.some(s => s.username === username && (!isEditing || s.username !== originalUsername));
       if (clashes){ errEl.textContent = "That username is already taken — choose another."; return; }
+      const permEditProducts = document.getElementById("mPermEditProducts") ? document.getElementById("mPermEditProducts").checked : true;
+      const permDeleteAny = document.getElementById("mPermDeleteAny") ? document.getElementById("mPermDeleteAny").checked : false;
+      const permissions = { editProducts: permEditProducts, deleteAny: permDeleteAny };
+      const presence = m.data.presence || null;
       if (isEditing && originalUsername !== username){ await dbRemove("staff", originalUsername); }
-      await dbSet("staff", username, { name, username, password, createdAt: m.data.createdAt || Date.now() });
+      await dbSet("staff", username, { name, username, password, permissions, presence, createdAt: m.data.createdAt || Date.now() });
       state.modal = null; render();
     }
   };
