@@ -349,7 +349,18 @@ function attachListener(node, key){
   db.ref(node).on("value", (snap)=>{
     const val = snap.val();
     syncOpenModalFromDom();
-    state[key] = val ? Object.values(val) : [];
+    // IMPORTANT: always trust the real Firebase key as this record's identity, never
+    // whatever "id" (or "username") happens to be stored inside the value. If those
+    // ever drift apart — e.g. an old record saved before an id existed, a manual edit
+    // in the Firebase console, or any past save that wrote to a different path than
+    // its own id field — editing/deleting would silently target the wrong path and
+    // look like "nothing happens" or "it created a duplicate instead of updating".
+    // Re-stamping the key here on every read makes that class of bug impossible.
+    state[key] = val ? Object.keys(val).map(k=>{
+      const rec = Object.assign({}, val[k], { id: k });
+      if (node === "staff") rec.username = k;
+      return rec;
+    }) : [];
     state.lastSync = Date.now();
 
     // Security: if the admin deletes (or renames) the staff account that is
@@ -1021,6 +1032,7 @@ function bindLightbox(){
 }
 
 function renderRatesTab(){
+  const canManage = canManageProducts();
   const visibleRates = state.rates.filter(r => r.visible !== false);
   const cards = visibleRates.map(r => `
     <div class="rate-card">
@@ -1031,7 +1043,10 @@ function renderRatesTab(){
     </div>
   `).join("");
   return `
-    <div class="section-head"><div><h2>Today's Rates</h2><p>Only products marked "Show on Daily Rates" appear here. Go to the Products tab to add or edit.</p></div></div>
+    <div class="section-head">
+      <div><h2>Today's Rates</h2><p>Only products marked "Show on Daily Rates" appear here — added from the Products tab.</p></div>
+      ${canManage ? `<button class="btn btn-copper" id="addRateBtnFromDaily">${ICONS.plus} Add product</button>` : ``}
+    </div>
     ${visibleRates.length ? `<div class="rate-grid">${cards}</div>` : `<div class="empty">No products marked for Daily Rates yet.</div>`}
   `;
 }
@@ -1718,6 +1733,11 @@ function bindApp(){
   document.querySelectorAll(".tab").forEach(b=>{
     b.onclick = ()=>{ state.tab = b.dataset.tab; render(); };
   });
+
+  if (state.tab === 'rates'){
+    const addBtnDaily = document.getElementById("addRateBtnFromDaily");
+    if (addBtnDaily) addBtnDaily.onclick = ()=>{ state.modal = {type:'rate', data:{visible:true}}; render(); };
+  }
 
   if (state.tab === 'products'){
     const addBtn = document.getElementById("addRateBtn");
