@@ -55,7 +55,8 @@
   .status-dot.idle{background:#3A6EC9;}
   .status-dot.offline{background:var(--red);}
   .status-label{font-size:10.5px;color:var(--ink-soft);margin-left:2px;}
-  .staff-name-cell{display:flex;align-items:center;}
+  .staff-name-cell{display:flex;align-items:flex-start;}
+  .staff-name-cell .status-dot{margin-top:4px;}
   .tag.udhaar{background:#FDEFE0;color:#A05A1E;}
   .perm-box{border:1px solid var(--paper-line);border-radius:9px;padding:10px 12px;margin-top:6px;background:#FBF8F0;}
   .perm-row{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:4px 0;}
@@ -402,16 +403,20 @@ function forceLogoutStaffRemoved(){
 }
 
 // ---------- staff presence (green = active, blue = not active, red = logged out) ----------
+let presenceVisibilityBound = false;
 function presenceRef(username){ return db.ref("staff/" + username + "/presence"); }
 function setupPresence(username){
   if (!db || !username) return;
   const ref = presenceRef(username);
   ref.onDisconnect().set({ state: "idle", lastSeen: firebase.database.ServerValue.TIMESTAMP });
   ref.set({ state: "online", lastSeen: firebase.database.ServerValue.TIMESTAMP });
-  document.addEventListener("visibilitychange", ()=>{
-    if (!db || state.role !== 'staff' || state.currentUser !== username) return;
-    ref.set({ state: document.hidden ? "idle" : "online", lastSeen: firebase.database.ServerValue.TIMESTAMP });
-  });
+  if (!presenceVisibilityBound){
+    presenceVisibilityBound = true;
+    document.addEventListener("visibilitychange", ()=>{
+      if (!db || state.role !== 'staff' || !state.currentUser) return;
+      presenceRef(state.currentUser).set({ state: document.hidden ? "idle" : "online", lastSeen: firebase.database.ServerValue.TIMESTAMP });
+    });
+  }
 }
 function markStaffLoggedOut(username){
   if (!db || !username) return;
@@ -423,6 +428,17 @@ function staffStatusInfo(s){
   if (!p || p.state === 'loggedOut') return { cls: 'offline', label: 'Logged out' };
   if (p.state === 'online') return { cls: 'online', label: 'Active' };
   return { cls: 'idle', label: 'Not active' };
+}
+function timeAgo(ts){
+  if (!ts) return '';
+  const diff = Date.now() - Number(ts);
+  if (diff < 60000) return 'just now';
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return mins + (mins === 1 ? ' min ago' : ' mins ago');
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return hours + (hours === 1 ? ' hour ago' : ' hours ago');
+  const days = Math.floor(hours / 24);
+  return days + (days === 1 ? ' day ago' : ' days ago');
 }
 
 async function seedIfEmpty(){
@@ -490,6 +506,8 @@ let state = {
   lightboxImg: null,
   ledgerFilter: "today",
   longLedgerFilter: "all",
+  longLedgerRangeFrom: "",
+  longLedgerRangeTo: "",
   ledgerSearch: "",
   longLedgerSearch: "",
   udhaarSearch: "",
@@ -1003,8 +1021,7 @@ function renderApp(){
     <nav>
       <button class="tab ${state.tab==='rates'?'active':''}" data-tab="rates">Daily Rates</button>
       <button class="tab ${state.tab==='products'?'active':''}" data-tab="products">Products</button>
-      <button class="tab ${state.tab==='ledger'?'active':''}" data-tab="ledger">Ledger</button>
-      <button class="tab ${state.tab==='longledger'?'active':''}" data-tab="longledger">Long Ledger</button>
+      <button class="tab ${state.tab==='longledger'?'active':''}" data-tab="longledger">Ledger</button>
       <button class="tab ${state.tab==='udhaar'?'active':''}" data-tab="udhaar">Udhaar</button>
       <button class="tab ${state.tab==='dashboard'?'active':''}" data-tab="dashboard">Dashboard</button>
       ${state.role==='admin' ? `<button class="tab ${state.tab==='admin'?'active':''}" data-tab="admin">Admin</button>` : ``}
@@ -1013,7 +1030,6 @@ function renderApp(){
       <div class="panel">
         ${state.tab==='rates' ? renderRatesTab()
           : state.tab==='products' ? renderProductsTab()
-          : state.tab==='ledger' ? renderLedgerTab()
           : state.tab==='longledger' ? renderLongLedgerTab()
           : state.tab==='udhaar' ? renderUdhaarTab()
           : state.tab==='dashboard' ? renderDashboardTab()
@@ -1104,8 +1120,8 @@ function sortNewestFirst(arr){
   return arr.slice().sort((a,b)=>{
     // Primary: date descending (YYYY-MM-DD string compare works correctly)
     if (b.date !== a.date) return b.date > a.date ? 1 : -1;
-    // Tiebreaker: createdAt timestamp descending (newer entries at top within same day)
-    return (b.createdAt||0) - (a.createdAt||0);
+    // Tiebreaker: exact creation timestamp descending (newer entries at top within same day)
+    return (b.timestamp||0) - (a.timestamp||0);
   });
 }
 
@@ -1152,7 +1168,13 @@ function renderLedgerTab(){
 
 function filteredLongLedger(){
   let list = state.longLedger;
-  if (state.longLedgerFilter === 'today'){ const t = todayStr(); list = list.filter(b => b.date === t); }
+  if (state.longLedgerFilter === 'today'){
+    const t = todayStr(); list = list.filter(b => b.date === t);
+  } else if (state.longLedgerFilter === 'range' && (state.longLedgerRangeFrom || state.longLedgerRangeTo)){
+    const from = state.longLedgerRangeFrom || "0000-00-00";
+    const to = state.longLedgerRangeTo || "9999-99-99";
+    list = list.filter(b => b.date >= from && b.date <= to);
+  }
   if (state.longLedgerSearch && state.longLedgerSearch.trim()){
     const q = state.longLedgerSearch.trim().toLowerCase();
     list = list.filter(b =>
@@ -1175,23 +1197,30 @@ function renderLongLedgerTab(){
       <td style="text-align:right;"><span class="amt mono">${fmtMoney(b.totalAmount)}</span></td>
     </tr>
   `).join("");
+  const isRange = state.longLedgerFilter === 'range';
   return `
     <div class="section-head">
-      <div><h2>Long Ledger</h2><p>Full itemised bills — products, quantity, unit, customer details and photo.</p></div>
-      <button class="btn btn-copper" id="addBillBtn">${ICONS.plus} New bill</button>
+      <div><h2>Ledger</h2><p>Every invoice — products, quantity, unit, customer details, payment mode and photo. Newest always at the top.</p></div>
+      <button class="btn btn-copper" id="addBillBtn">${ICONS.plus} New entry</button>
     </div>
     <div class="toolbar" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
       <select id="longLedgerFilter" style="flex:0 0 auto;">
-        <option value="all" ${state.longLedgerFilter==='all'?'selected':''}>All bills</option>
+        <option value="all" ${state.longLedgerFilter==='all'?'selected':''}>All dates</option>
         <option value="today" ${state.longLedgerFilter==='today'?'selected':''}>Today</option>
+        <option value="range" ${isRange?'selected':''}>Date range…</option>
       </select>
+      ${isRange ? `
+      <input id="longLedgerRangeFrom" type="date" value="${escapeAttr(state.longLedgerRangeFrom||'')}" style="padding:6px 8px;border:1px solid #ddd;border-radius:8px;font-size:13px;"/>
+      <span style="font-size:12px;color:var(--ink-soft);">to</span>
+      <input id="longLedgerRangeTo" type="date" value="${escapeAttr(state.longLedgerRangeTo||'')}" style="padding:6px 8px;border:1px solid #ddd;border-radius:8px;font-size:13px;"/>
+      ` : ``}
       <div style="flex:1;min-width:160px;position:relative;">
         <input id="longLedgerSearch" type="search" placeholder="Search by customer name…" value="${escapeAttr(state.longLedgerSearch||'')}"
           style="width:100%;padding:7px 10px 7px 30px;border:1px solid #ddd;border-radius:8px;font-size:13px;box-sizing:border-box;"/>
         <span style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:#aaa;font-size:13px;">🔍</span>
       </div>
     </div>
-    ${bills.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Date</th><th>Customer</th><th>Items</th><th>Payment</th><th style="text-align:right;">Total</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">No bills found${state.longLedgerSearch ? ' matching "'+escapeHtml(state.longLedgerSearch)+'"' : ''}.</div>`}
+    ${bills.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Date</th><th>Customer</th><th>Items</th><th>Payment</th><th style="text-align:right;">Total</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">No entries found${state.longLedgerSearch ? ' matching "'+escapeHtml(state.longLedgerSearch)+'"' : (isRange ? ' in that date range' : '')}.</div>`}
   `;
 }
 
@@ -1224,7 +1253,7 @@ function renderUdhaarTab(){
   `).join("");
   return `
     <div class="section-head">
-      <div><h2>Udhaar</h2><p>Every ledger entry and bill marked with payment mode "Udhaar" — the running credit / due register. Fully paid ones move into the Ledger / Long Ledger automatically.</p></div>
+      <div><h2>Udhaar</h2><p>Every ledger entry marked with payment mode "Udhaar" — the running credit / due register. Fully paid ones move into the Ledger automatically.</p></div>
     </div>
     <div class="stat-grid" style="margin-bottom:14px;">
       <div class="stat expense"><div class="label">Total Still Due</div><div class="value">${fmtMoney(totalDue)}</div></div>
@@ -1265,7 +1294,7 @@ function renderDashboardTab(){
       <div class="stat expense"><div class="label">Expenses</div><div class="value">${fmtMoney(expenses)}</div></div>
       <div class="stat"><div class="label">Net</div><div class="value" style="color:${net>=0?'var(--green)':'var(--red)'}">${fmtMoney(net)}</div></div>
     </div>
-    <div class="section-head"><div><h2>Long Ledger Today</h2><p>${billsToday.length} bill${billsToday.length===1?'':'s'} · ${fmtMoney(billTotal)} billed</p></div></div>
+    <div class="section-head"><div><h2>Ledger Today</h2><p>${billsToday.length} bill${billsToday.length===1?'':'s'} · ${fmtMoney(billTotal)} billed</p></div></div>
     <div class="section-head"><div><h2>Catalogue</h2><p>${state.rates.length} products tracked on the rate card.</p></div></div>
   `;
 }
@@ -1284,9 +1313,11 @@ function renderAdminTab(){
 function renderStaffAdmin(){
   const rows = state.staffList.map(s => {
     const status = staffStatusInfo(s);
+    const lastSeen = s.presence && s.presence.lastSeen;
+    const showLastSeen = status.cls !== 'online' && lastSeen;
     return `
     <tr>
-      <td><div class="staff-name-cell"><span class="status-dot ${status.cls}" title="${status.label}"></span>${escapeHtml(s.name || s.username)}<span class="status-label">${status.label}</span></div></td>
+      <td><div class="staff-name-cell"><span class="status-dot ${status.cls}" title="${status.label}"></span><div><div>${escapeHtml(s.name || s.username)}</div><div class="status-label" style="margin-left:0;">${status.label}${showLastSeen ? ' · last active ' + timeAgo(lastSeen) : ''}</div></div></div></td>
       <td class="mono">${escapeHtml(s.username)}</td>
       <td class="mono">${escapeHtml(s.password)}</td>
       <td style="white-space:nowrap;">
@@ -1329,7 +1360,7 @@ function renderBackupAdmin(){
       <div class="field"><label>Type DELETE to confirm</label><input type="text" id="cleanupConfirm" placeholder="DELETE"/></div>
       <button class="btn btn-danger" id="cleanupBtn">${ICONS.trash} Delete old entries</button>
       <hr style="border:none;border-top:1px solid #E3C8C5;margin:16px 0;"/>
-      <p><strong>Or remove everything</strong> from Ledger and Long Ledger (Products and Staff Accounts are kept).</p>
+      <p><strong>Or remove everything</strong> from the Ledger (Products and Staff Accounts are kept).</p>
       <div class="field"><label>Type DELETE ALL to confirm</label><input type="text" id="wipeConfirm" placeholder="DELETE ALL"/></div>
       <button class="btn btn-danger" id="wipeBtn">${ICONS.trash} Delete all ledger history</button>
     </div>
@@ -1499,7 +1530,7 @@ function renderModal(){
           <input type="checkbox" id="mVisible" style="width:auto;" ${isVisible ? 'checked' : ''}/>
           <label style="margin:0;" for="mVisible">Show on Daily Rates tab</label>
         </div>
-        <p style="font-size:11px;color:var(--ink-soft);margin:-6px 0 12px;">Every product always appears here in Products. This box is off by default — tick it only if you also want it on the Daily Rates tab.</p>
+        <p style="font-size:11px;color:var(--ink-soft);margin:-6px 0 12px;">Every product always appears here in Products. ${isVisible ? 'Untick this if you don\'t want it on the Daily Rates tab too.' : 'This box is off by default — tick it only if you also want it on the Daily Rates tab.'}</p>
         <datalist id="unitOptionsList">${UNIT_OPTIONS.map(u=>`<option value="${u}"></option>`).join('')}</datalist>
         <div class="err" id="modalErr"></div>
         <div class="modal-actions">
@@ -1795,7 +1826,7 @@ function bindApp(){
     const addBtnDaily = document.getElementById("addRateBtnFromDaily");
     if (addBtnDaily) addBtnDaily.onclick = ()=>{ state.modal = {type:'pickDailyRate', data:{search:''}}; render(); };
     const addNewFromDaily = document.getElementById("addNewProductFromDaily");
-    if (addNewFromDaily) addNewFromDaily.onclick = ()=>{ state.modal = {type:'rate', data:{}}; render(); };
+    if (addNewFromDaily) addNewFromDaily.onclick = ()=>{ state.modal = {type:'rate', data:{visible:true}}; render(); };
     const rSearch = document.getElementById("ratesSearch");
     if (rSearch){ rSearch.oninput = (e)=>{ state.ratesSearch = e.target.value; render(); }; }
   }
@@ -1839,6 +1870,10 @@ function bindApp(){
   if (state.tab === 'longledger'){
     document.getElementById("addBillBtn").onclick = ()=>{ state.modal = {type:'longledger', data:{}}; render(); };
     document.getElementById("longLedgerFilter").onchange = (e)=>{ state.longLedgerFilter = e.target.value; render(); };
+    const llFrom = document.getElementById("longLedgerRangeFrom");
+    if (llFrom) llFrom.onchange = (e)=>{ state.longLedgerRangeFrom = e.target.value; render(); };
+    const llTo = document.getElementById("longLedgerRangeTo");
+    if (llTo) llTo.onchange = (e)=>{ state.longLedgerRangeTo = e.target.value; render(); };
     const llSearch = document.getElementById("longLedgerSearch");
     if (llSearch){ llSearch.oninput = (e)=>{ state.longLedgerSearch = e.target.value; render(); }; }
     document.querySelectorAll("[data-bill-id]").forEach(tr=>{
@@ -2137,6 +2172,9 @@ function bindModal(){
     await seedIfEmpty();
     attachAllListeners();
     initGoogleDrive();
+    if (status && status.ready && status.role === 'staff' && status.username){
+      setupPresence(status.username);
+    }
   }catch(e){
     firebaseError = "Could not reach the live database. Check your internet connection and reload.";
     console.error(e);
