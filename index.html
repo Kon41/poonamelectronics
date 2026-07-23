@@ -94,6 +94,8 @@
   .tag.sale{background:#E7F2EC;color:var(--green);}
   .tag.purchase{background:#FBF0E2;color:var(--copper-deep);}
   .tag.expense{background:#FBEAE8;color:var(--red);}
+  .tag.receipt{background:#E8F1FB;color:#2A5DA8;}
+  .tag.invoice{background:#F0EAFB;color:#6A3FA8;}
   .amt{font-family:'JetBrains Mono',monospace;font-weight:600;}
   .amt.neg{color:var(--red);}
   .amt.pos{color:var(--green);}
@@ -549,6 +551,8 @@ function canManageProducts(){
   if (state.role === 'admin') return true;
   return staffHasPermission(currentStaffRecord(), 'editProducts');
 }
+function isInflow(type){ return type === 'sale' || type === 'receipt'; }
+
 function paymentModeLabel(e){
   if (!e || !e.paymentMode) return "—";
   if (e.paymentMode === 'Custom') return escapeHtml(e.customPaymentMode || 'Custom');
@@ -1143,7 +1147,7 @@ function renderLedgerTab(){
       <td><span class="tag ${e.type}">${e.type}</span></td>
       <td>${escapeHtml(e.party||'—')}${e.image ? ' <span title="Has photo">📷</span>' : ''}</td>
       <td>${e.paymentMode==='Udhaar' ? `<span class="tag udhaar">${isFullySettled(e) ? 'Udhaar ✓' : 'Udhaar'}</span>` : paymentModeLabel(e)}</td>
-      <td style="text-align:right;"><span class="amt ${e.type==='sale'?'pos':'neg'}">${e.type==='sale'?'+':'−'}${fmtMoney(e.amount)}</span></td>
+      <td style="text-align:right;"><span class="amt ${isInflow(e.type)?'pos':'neg'}">${isInflow(e.type)?'+':'−'}${fmtMoney(e.amount)}</span></td>
     </tr>
   `).join("");
   return `
@@ -1166,42 +1170,63 @@ function renderLedgerTab(){
   `;
 }
 
+function combinedLedgerRows(){
+  const entries = state.ledger.map(e => ({
+    kind: 'entry', id: e.id, date: e.date, timestamp: e.timestamp,
+    name: e.party || '—', typeLabel: e.type, paymentMode: e.paymentMode,
+    customPaymentMode: e.customPaymentMode, amount: Number(e.amount||0),
+    inflow: isInflow(e.type), hasImage: !!e.image, ref: e
+  }));
+  const bills = state.longLedger.map(b => ({
+    kind: 'bill', id: b.id, date: b.date, timestamp: b.timestamp,
+    name: b.customerName || '—', typeLabel: 'invoice', paymentMode: b.paymentMode,
+    customPaymentMode: b.customPaymentMode, amount: Number(b.totalAmount||0),
+    inflow: true, hasImage: !!b.image, ref: b
+  }));
+  return entries.concat(bills);
+}
+
 function filteredLongLedger(){
-  let list = state.longLedger;
+  let list = combinedLedgerRows();
   if (state.longLedgerFilter === 'today'){
-    const t = todayStr(); list = list.filter(b => b.date === t);
+    const t = todayStr(); list = list.filter(r => r.date === t);
   } else if (state.longLedgerFilter === 'range' && (state.longLedgerRangeFrom || state.longLedgerRangeTo)){
     const from = state.longLedgerRangeFrom || "0000-00-00";
     const to = state.longLedgerRangeTo || "9999-99-99";
-    list = list.filter(b => b.date >= from && b.date <= to);
+    list = list.filter(r => r.date >= from && r.date <= to);
   }
   if (state.longLedgerSearch && state.longLedgerSearch.trim()){
     const q = state.longLedgerSearch.trim().toLowerCase();
-    list = list.filter(b =>
-      (b.customerName||'').toLowerCase().includes(q) ||
-      (b.customerPhone||'').toLowerCase().includes(q) ||
-      (b.customerAddress||'').toLowerCase().includes(q)
+    list = list.filter(r =>
+      r.name.toLowerCase().includes(q) ||
+      (r.ref.customerPhone||'').toLowerCase().includes(q) ||
+      (r.ref.customerAddress||'').toLowerCase().includes(q)
     );
   }
   return sortNewestFirst(list);
 }
 
+const TYPE_TAG_LABEL = { sale: 'Sale', purchase: 'Purchase', expense: 'Expense', receipt: 'Receipt', invoice: 'Invoice' };
+
 function renderLongLedgerTab(){
-  const bills = filteredLongLedger();
-  const rows = bills.map(b => `
-    <tr data-bill-id="${b.id}" style="cursor:pointer;">
-      <td class="mono" style="white-space:nowrap;">${b.date}</td>
-      <td>${escapeHtml(b.customerName||'—')}${b.image ? ' <span title="Has photo">📷</span>' : ''}</td>
-      <td>${(b.items||[]).length} item${(b.items||[]).length===1?'':'s'}</td>
-      <td>${b.paymentMode==='Udhaar' ? `<span class="tag udhaar">${isFullySettled(b) ? 'Udhaar ✓' : 'Udhaar'}</span>` : paymentModeLabel(b)}</td>
-      <td style="text-align:right;"><span class="amt mono">${fmtMoney(b.totalAmount)}</span></td>
+  const rows = filteredLongLedger();
+  const trs = rows.map(r => `
+    <tr data-row-kind="${r.kind}" data-row-id="${r.id}" style="cursor:pointer;">
+      <td class="mono" style="white-space:nowrap;">${r.date}</td>
+      <td>${escapeHtml(r.name)}${r.hasImage ? ' <span title="Has photo">📷</span>' : ''}</td>
+      <td><span class="tag ${r.typeLabel}">${TYPE_TAG_LABEL[r.typeLabel] || r.typeLabel}</span></td>
+      <td>${r.paymentMode==='Udhaar' ? `<span class="tag udhaar">${isFullySettled(r.ref) ? 'Udhaar ✓' : 'Udhaar'}</span>` : paymentModeLabel(r.ref)}</td>
+      <td style="text-align:right;"><span class="amt ${r.inflow?'pos':'neg'} mono">${r.inflow?'+':'−'}${fmtMoney(r.amount)}</span></td>
     </tr>
   `).join("");
   const isRange = state.longLedgerFilter === 'range';
   return `
     <div class="section-head">
-      <div><h2>Ledger</h2><p>Every invoice — products, quantity, unit, customer details, payment mode and photo. Newest always at the top.</p></div>
-      <button class="btn btn-copper" id="addBillBtn">${ICONS.plus} New entry</button>
+      <div><h2>Ledger</h2><p>Every sale, purchase, expense, receipt and invoice in one place — newest always at the top.</p></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-ghost" id="addLedgerEntryBtn">${ICONS.plus} New entry</button>
+        <button class="btn btn-copper" id="addBillBtn">${ICONS.plus} New invoice</button>
+      </div>
     </div>
     <div class="toolbar" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
       <select id="longLedgerFilter" style="flex:0 0 auto;">
@@ -1215,14 +1240,15 @@ function renderLongLedgerTab(){
       <input id="longLedgerRangeTo" type="date" value="${escapeAttr(state.longLedgerRangeTo||'')}" style="padding:6px 8px;border:1px solid #ddd;border-radius:8px;font-size:13px;"/>
       ` : ``}
       <div style="flex:1;min-width:160px;position:relative;">
-        <input id="longLedgerSearch" type="search" placeholder="Search by customer name…" value="${escapeAttr(state.longLedgerSearch||'')}"
+        <input id="longLedgerSearch" type="search" placeholder="Search by name…" value="${escapeAttr(state.longLedgerSearch||'')}"
           style="width:100%;padding:7px 10px 7px 30px;border:1px solid #ddd;border-radius:8px;font-size:13px;box-sizing:border-box;"/>
         <span style="position:absolute;left:9px;top:50%;transform:translateY(-50%);color:#aaa;font-size:13px;">🔍</span>
       </div>
     </div>
-    ${bills.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Date</th><th>Customer</th><th>Items</th><th>Payment</th><th style="text-align:right;">Total</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<div class="empty">No entries found${state.longLedgerSearch ? ' matching "'+escapeHtml(state.longLedgerSearch)+'"' : (isRange ? ' in that date range' : '')}.</div>`}
+    ${rows.length ? `<div style="overflow-x:auto;"><table><thead><tr><th>Date</th><th>Name</th><th>Type</th><th>Payment</th><th style="text-align:right;">Amount</th></tr></thead><tbody>${trs}</tbody></table></div>` : `<div class="empty">No entries found${state.longLedgerSearch ? ' matching "'+escapeHtml(state.longLedgerSearch)+'"' : (isRange ? ' in that date range' : '')}.</div>`}
   `;
 }
+
 
 function udhaarEntries(){
   let ledgerDue = state.ledger.filter(isUdhaar).map(e => ({ kind:'ledger', id:e.id, date:e.date, timestamp:e.timestamp, name:e.party||'—', total:recordTotal(e), paid:paidSoFar(e), due:remainingDue(e), ref:e }));
@@ -1282,19 +1308,20 @@ function renderDashboardTab(){
   const t = todayStr();
   const todays = state.ledger.filter(e=>e.date===t);
   const sum = (type)=> todays.filter(e=>e.type===type).reduce((s,e)=>s+Number(e.amount||0),0);
-  const sales = sum('sale'), purchases = sum('purchase'), expenses = sum('expense');
+  const sales = sum('sale'), purchases = sum('purchase'), expenses = sum('expense'), receipts = sum('receipt');
   const billsToday = state.longLedger.filter(b=>b.date===t);
   const billTotal = billsToday.reduce((s,b)=>s+Number(b.totalAmount||0),0);
-  const net = sales - purchases - expenses;
+  const net = sales + receipts - purchases - expenses;
   return `
     <div class="section-head"><div><h2>Today's Summary</h2><p>${new Date().toLocaleDateString('en-IN',{weekday:'long', day:'numeric', month:'long'})}</p></div></div>
     <div class="stat-grid">
       <div class="stat sale"><div class="label">Sales</div><div class="value">${fmtMoney(sales)}</div></div>
+      <div class="stat sale"><div class="label">Receipts</div><div class="value">${fmtMoney(receipts)}</div></div>
       <div class="stat purchase"><div class="label">Purchases</div><div class="value">${fmtMoney(purchases)}</div></div>
       <div class="stat expense"><div class="label">Expenses</div><div class="value">${fmtMoney(expenses)}</div></div>
       <div class="stat"><div class="label">Net</div><div class="value" style="color:${net>=0?'var(--green)':'var(--red)'}">${fmtMoney(net)}</div></div>
     </div>
-    <div class="section-head"><div><h2>Ledger Today</h2><p>${billsToday.length} bill${billsToday.length===1?'':'s'} · ${fmtMoney(billTotal)} billed</p></div></div>
+    <div class="section-head"><div><h2>Invoices Today</h2><p>${billsToday.length} bill${billsToday.length===1?'':'s'} · ${fmtMoney(billTotal)} billed</p></div></div>
     <div class="section-head"><div><h2>Catalogue</h2><p>${state.rates.length} products tracked on the rate card.</p></div></div>
   `;
 }
@@ -1577,12 +1604,13 @@ function renderModal(){
     <div class="overlay" id="overlay">
       <div class="modal">
         <h3>${d.id ? 'Edit entry' : 'New ledger entry'}</h3>
-        <p class="desc">${d.id ? 'Update this entry — changes sync instantly.' : 'Log a sale, purchase or expense.'}</p>
+        <p class="desc">${d.id ? 'Update this entry — changes sync instantly.' : 'Log a sale, purchase, expense or a payment received from a customer.'}</p>
         <div class="field"><label>Type</label>
           <select id="mType">
             <option value="sale" ${d.type==='sale'?'selected':''}>Sale</option>
             <option value="purchase" ${d.type==='purchase'?'selected':''}>Purchase</option>
             <option value="expense" ${d.type==='expense'?'selected':''}>Expense</option>
+            <option value="receipt" ${d.type==='receipt'?'selected':''}>Receipt (payment received)</option>
           </select>
         </div>
         <div class="field"><label>Date</label><input type="date" id="mDate" value="${d.date || todayStr()}"/></div>
@@ -1683,7 +1711,7 @@ function renderModal(){
         <h3>Entry details</h3>
         <p class="desc"><span class="tag ${e.type}">${e.type}</span>${e.paymentMode==='Udhaar' ? ` <span class="tag udhaar">${isFullySettled(e) ? 'Udhaar (Settled)' : 'Udhaar'}</span>` : ``}</p>
         <div style="display:flex;flex-direction:column;gap:10px;font-size:13.5px;margin-bottom:6px;">
-          <div><strong>Amount:</strong> <span class="amt ${e.type==='sale'?'pos':'neg'} mono">${e.type==='sale'?'+':'−'}${fmtMoney(e.amount)}</span></div>
+          <div><strong>Amount:</strong> <span class="amt ${isInflow(e.type)?'pos':'neg'} mono">${isInflow(e.type)?'+':'−'}${fmtMoney(e.amount)}</span></div>
           <div><strong>Date:</strong> ${e.date}</div>
           <div><strong>Party / customer:</strong> ${escapeHtml(e.party || '—')}</div>
           <div><strong>Payment mode:</strong> ${paymentModeLabel(e)}</div>
@@ -1869,6 +1897,8 @@ function bindApp(){
 
   if (state.tab === 'longledger'){
     document.getElementById("addBillBtn").onclick = ()=>{ state.modal = {type:'longledger', data:{}}; render(); };
+    const addEntryBtn = document.getElementById("addLedgerEntryBtn");
+    if (addEntryBtn) addEntryBtn.onclick = ()=>{ state.modal = {type:'ledger', data:{type:'sale'}}; render(); };
     document.getElementById("longLedgerFilter").onchange = (e)=>{ state.longLedgerFilter = e.target.value; render(); };
     const llFrom = document.getElementById("longLedgerRangeFrom");
     if (llFrom) llFrom.onchange = (e)=>{ state.longLedgerRangeFrom = e.target.value; render(); };
@@ -1876,11 +1906,17 @@ function bindApp(){
     if (llTo) llTo.onchange = (e)=>{ state.longLedgerRangeTo = e.target.value; render(); };
     const llSearch = document.getElementById("longLedgerSearch");
     if (llSearch){ llSearch.oninput = (e)=>{ state.longLedgerSearch = e.target.value; render(); }; }
-    document.querySelectorAll("[data-bill-id]").forEach(tr=>{
+    document.querySelectorAll("[data-row-id]").forEach(tr=>{
       tr.onclick = ()=>{
-        const id = tr.dataset.billId;
-        const bill = state.longLedger.find(b=>b.id===id);
-        if (bill) { state.modal = {type:'billDetail', data: bill}; render(); }
+        const id = tr.dataset.rowId;
+        const kind = tr.dataset.rowKind;
+        if (kind === 'entry'){
+          const entry = state.ledger.find(e=>e.id===id);
+          if (entry) { state.modal = {type:'entryDetail', data: entry}; render(); }
+        } else {
+          const bill = state.longLedger.find(b=>b.id===id);
+          if (bill) { state.modal = {type:'billDetail', data: bill}; render(); }
+        }
       };
     });
   }
